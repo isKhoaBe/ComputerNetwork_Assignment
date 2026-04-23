@@ -23,6 +23,7 @@ The current version supports MIME type detection, content loading and header for
 import datetime
 import os
 import mimetypes
+import json
 from .dictionary import CaseInsensitiveDict
 
 BASE_DIR = ""
@@ -163,7 +164,8 @@ class Response():
             elif sub_type == 'html':
                 base_dir = BASE_DIR+"www/"
             else:
-                handle_text_other(sub_type)
+                self.headers['Content-Type'] = 'text/plain'
+                base_dir = BASE_DIR+"static/"
         elif main_type == 'image':
             base_dir = BASE_DIR+"static/"
             self.headers['Content-Type']='image/{}'.format(sub_type)
@@ -183,7 +185,7 @@ class Response():
         #        ...
         #
         else:
-            raise ValueError("Invalid MEME type: main_type={} sub_type={}".format(main_type,sub_type))
+            raise ValueError("Invalid MIME type: main_type={} sub_type={}".format(main_type,sub_type))
 
         return base_dir
 
@@ -223,39 +225,43 @@ class Response():
 
         :rtypes bytes: encoded HTTP response header.
         """
-        reqhdr = request.headers
+        reqhdr = request.headers if request.headers else{}
         rsphdr = self.headers
 
         #Build dynamic headers
         headers = {
-                "Accept": "{}".format(reqhdr.get("Accept", "application/json")),
-                "Accept-Language": "{}".format(reqhdr.get("Accept-Language", "en-US,en;q=0.9")),
-                "Authorization": "{}".format(reqhdr.get("Authorization", "Basic <credentials>")),
+
+                "Date": datetime.datetime.utcnow().strftime("%a, %d %b %Y %H:%M:%S GMT"),
+                "Content-Type": self.headers.get("Content-Type", "text/html"),
+                "Content-Length": str(len(self._content)),
                 "Cache-Control": "no-cache",
-                "Content-Type": "{}".format(self.headers['Content-Type']),
-                "Content-Length": "{}".format(len(self._content)),
-        #       "Cookie": "{}".format(reqhdr.get("Cookie", "sessionid=xyz789")), #dummy cooki
-        #
-        # TODO prepare the request authentication
-        #
-        #       self.auth = ...
-                "Date": "{}".format(datetime.datetime.utcnow().strftime("%a, %d %b %Y %H:%M:%S GMT")),
-                "Max-Forward": "10",
-                "Pragma": "no-cache",
-                "Proxy-Authorization": "Basic dXNlcjpwYXNz",  # example base64
-                "Warning": "199 Miscellaneous warning",
-                "User-Agent": "{}".format(reqhdr.get("User-Agent", "Chrome/123.0.0.0")),
+                "Connection": "close",
+                "Accept": reqhdr.get("Accept", "*/*"),
+                "Accept-Language": reqhdr.get("Accept-Language", "en-US,en;q=0.9"),
+                "User-Agent": reqhdr.get("User-Agent", "AsynapRous/1.0"),
+        #         "Accept": "{}".format(reqhdr.get("Accept", "application/json")),
+        #         "Accept-Language": "{}".format(reqhdr.get("Accept-Language", "en-US,en;q=0.9")),
+        #         "Authorization": "{}".format(reqhdr.get("Authorization", "Basic <credentials>")),
+        #         "Cache-Control": "no-cache",
+        #         "Content-Type": "{}".format(self.headers['Content-Type']),
+        #         "Content-Length": "{}".format(len(self._content)),
+        # #       "Cookie": "{}".format(reqhdr.get("Cookie", "sessionid=xyz789")), #dummy cooki
+        # #       self.auth = ...
+        #         "Date": "{}".format(datetime.datetime.utcnow().strftime("%a, %d %b %Y %H:%M:%S GMT")),
+        #         "Max-Forward": "10",
+        #         "Pragma": "no-cache",
+        #         "Proxy-Authorization": "Basic dXNlcjpwYXNz",  # example base64
+        #         "Warning": "199 Miscellaneous warning",
+        #         "User-Agent": "{}".format(reqhdr.get("User-Agent", "Chrome/123.0.0.0")),
             }
 
-        # Header text alignment
-            #
-            #  TODO: implement the header building to create formated
-            #        header from the provied headers
-            #
-            #
-            # TODO prepare the request authentication
-            #
-            # self.auth = ...
+        if self.cookies:
+            cookies_parts = "; ".join(f"{k}={v}" for k, v in self.cookies.items())
+            headers["Set-Cookie"] = cookies_parts
+
+        fmt_header = "HTTP/1.1 200 OK\r\n"
+        fmt_header += "".join(f"{k}: {v}\r\n" for k, v in headers.items())
+        fmt_header += "\r\n"
 
 
         return str(fmt_header).encode('utf-8')
@@ -295,8 +301,6 @@ class Response():
         mime_type = self.get_mime_type(path)
         print("[Response] {} path {} mime_type {}".format(request.method, request.path, mime_type))
 
-        base_dir = ""
-
         #If HTML, parse and serve embedded objects
         if path.endswith('.html') or mime_type == 'text/html':
             base_dir = self.prepare_content_type(mime_type = 'text/html')
@@ -306,10 +310,55 @@ class Response():
             base_dir = self.prepare_content_type(mime_type = 'application/json')
             envelop_content = ""
 
-        #
-        # TODO: add support objects
-        #
+        if envelop_content is not None:
+            self._content = envelop_content.encode("utf-8") \
+                if isinstance(envelop_content, str) else envelop_content
         else:
-            return self.build_notfound()
+            content_length, self._content = self.build_content(path, base_dir)
+            if content_length == -1:
+                return self.build_notfound()
+
+        self._header = self.build_response_header(request)
 
         return self._header + self._content
+    
+    def build_login_response(self, username, session_token):
+        """
+        Builds a 200 OK response that sets a session cookie upon successful login.
+        Implemets RFC 6265 Set-Cookie mechanism.
+
+        :param username: (str) The authenticated username. 
+        :param session_token: (str) The session token to store in the cookie.
+        :rtype: bytes - complete HTTP response with Set-Cookie header.
+        """
+
+        body = json.dumps({"message": "Login successful", "user": username}).encode("utf-8")
+
+        header = (
+            "HTTP/1.1 200 OK\r\n"
+            f"Set-Cookie: session={session_token}; HttpOnly; Path=/\r\n"
+            "Content-Type: application/json\r\n"
+            f"Content-Length: {len(body)}\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+        ).encode("utf-8")
+
+        return header + body
+    
+    def build_logout_response(self):
+        """
+        Builds a 200 OK response that clears the session cookie (logout).
+        Uses Max-Age = 0 per 6265 Section 3.1 to expire the cookie immediately.
+
+        :rtype: bytes - complete HTTP response clearing the session cookie.
+        """
+        body = b'{"message": "Logged out"}'
+        header = (
+            "HTTP/1.1 200 OK\r\n"
+            "Set-Cookie: session=; HttpOnly; Path=/; Max-Age=0\r\n"
+            "Content-Type: application/json\r\n"
+            f"Content-Length: {len(body)}\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+        ).encode("utf-8")
+        return header + body

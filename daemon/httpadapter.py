@@ -25,7 +25,26 @@ from .response import Response
 from .dictionary import CaseInsensitiveDict
 
 import asyncio
+import base64
+import json
 import inspect
+import uuid
+
+SESSION_STORE = {}
+
+USER_DB = {
+            "admin": "admin123",
+            "user1": "password",
+        }
+
+def create_session(username):
+    token = str(uuid.uuid4())
+    SESSION_STORE[token] = username
+    return token
+
+
+def destroy_session(token):
+    SESSION_STORE.pop(token, None)
 
 class HttpAdapter:
     """
@@ -55,6 +74,9 @@ class HttpAdapter:
         "routes",
         "request",
         "response",
+        #--- Additionals ---#
+        "user",
+        "session_token",
     ]
 
     def __init__(self, ip, port, conn, connaddr, routes):
@@ -106,19 +128,30 @@ class HttpAdapter:
         resp = self.response
 
         # Handle the request
-        msg = conn.recv(1024).decode()
+        msg = conn.recv(4096).decode()
         req.prepare(msg, routes)
         print("[HttpAdapter] Invoke handle_client connection {}".format(addr))
 
+        response = b""
+
         # Handle request hook
         if req.hook:
-            #
-            # TODO: handle for App hook here
-            #
-            response = ""
+            auth_result = self.authenticate(req)
+
+            if not auth_result["authenticated"]:
+                response = self.build_auth_challenge()
+            else:
+                req.user = auth_result["username"]
+                result = req.hook(req.headers, req.body)
+                if inspect.isawaitable(result):
+                    result = asyncio.run(result)
+                response = self.build_json_response(req, result)
+        else:
+            #This is the response from object Response
+            response = resp.build_response(req)
 
         #print("[HttpAdapter] Response content {}".format(response))
-        conn.sendall(response)
+        conn.sendall(response if isinstance(response, bytes) else response.encode())
         conn.close()
 
     async def handle_client_coroutine(self, reader, writer):
@@ -138,32 +171,39 @@ class HttpAdapter:
         # Response handler
         resp = self.response
 
-        print("[HttpAdapter] Invoke handle_client_coroutine connection {})".format(addr))
         addr = writer.get_extra_info("peername")
+        print("[HttpAdapter] Invoke handle_client_coroutine connection {}".format(addr))
 
         # TODO Handle the request asynchronously
         msg = await reader.read(1024)
 
 
-        req.prepare(msg.decode("utf-8"), routes={})
+        req.prepare(msg.decode("utf-8"), routes=self.routes)
 
         # Handle request hook
         if req.hook:
-            #
-            # TODO: handle for App hook here
-            #
-            response = ""
-
-        # Build response
-        #print("[HttpAdapter] Start **ASYNC** build_response with type {}".format(type(req)))
-        response = resp.build_response(req)
+            auth_result = self.authenticate(req)
+            if not auth_result["authenticated"]:
+                response = self.build_auth_challenge()
+            else:
+                req.user = auth_result["username"]
+                result = req.hook(req.headers, req.body)
+                if inspect.isawaitable(result):
+                    result = await result
+                response = self.build_json_response(req, result)
+        else:
+            # Build response
+            #print("[HttpAdapter] Start **ASYNC** build_response with type {}".format(type(req)))
+            response = resp.build_response(req)
 
         # Send all the response asynchronously
-        writer.write(response)
+        writer.write(response if isinstance(response, bytes) else response.encode("utf-8"))
         await writer.drain()
+        writer.close()
+        await writer.wait_closed()
 
     @property
-    def extract_cookies(self, req, resp):
+    def extract_cookies(self):
         """
         Build cookies from the :class:`Request <Request>` headers.
 
@@ -172,16 +212,23 @@ class HttpAdapter:
         :rtype: cookies - A dictionary of cookie key-value pairs.
         """
         cookies = {}
-        for header in headers:
-            if header.startswith("Cookie:"):
-                cookie_str = header.split(":", 1)[1].strip()
-                for pair in cookie_str.split(";"):
-                    key, value = pair.strip().split("=")
-                    cookies[key] = value
+
+        headers = self.request.headers or {}
+        if not isinstance(headers, CaseInsensitiveDict):
+            headers = CaseInsensitiveDict(headers)
+
+        cookie_header = headers.get("Cookie", "")
+        if not cookie_header:
+            return cookies
+        for pair in cookie_header.split(";"):
+            pair = pair.strip()
+            if "=" in pair:
+                key, value = pair.split("=", 1)
+                cookies[key.strip()] = value.strip()
         return cookies
 
-    def build_response(self, req, resp):
-        """Builds a :class:`Response <Response>` object 
+    def build_response_object(self, req, resp):
+        """Builds a :class:`Response <Response>` object.
 
         :param req: The :class:`Request <Request>` used to generate the response.
         :param resp: The  response object.
@@ -190,9 +237,9 @@ class HttpAdapter:
         response = Response()
 
         # Set encoding.
-        response.encoding = get_encoding_from_headers(response.headers)
+        response.encoding = None
         response.raw = resp
-        response.reason = response.raw.reason
+        response.reason = getattr(response.raw, "reason", None)
 
         if isinstance(req.url, bytes):
             response.url = req.url.decode("utf-8")
@@ -200,7 +247,7 @@ class HttpAdapter:
             response.url = req.url
 
         # Add new cookies from the server.
-        response.cookies = extract_cookies(req)
+        response.cookies = self.extract_cookies
 
         # Give the Response some context.
         response.request = req
@@ -208,28 +255,52 @@ class HttpAdapter:
 
         return response
 
+
+    def build_response(self, req, resp):
+        """Backward-compatible alias for build_response_object.
+
+        :param req: The :class:`Request <Request>` used to generate the response.
+        :param resp: The response object.
+        :rtype: Response
+        """
+        return self.build_response_object(req, resp)
+
     def build_json_response(self, req, resp):
-        """Builds a :class:`Response <Response>` object from JSON data
+        """Builds a JSON HTTP response payload.
 
         :param req: The :class:`Request <Request>` used to generate the response.
         :param resp: The  response object.
-        :rtype: Response
+        :rtype: bytes
         """
-        response = Response(req)
-
-        # Set encoding.
-        response.raw = resp
-
-        if isinstance(req.url, bytes):
-            response.url = req.url.decode("utf-8")
+        if isinstance(resp, bytes):
+            body = resp
+        elif isinstance(resp, str):
+            body = resp.encode("utf-8")
         else:
-            response.url = req.url
+            body = json.dumps(resp).encode("utf-8")
 
-        # Give the Response some context.
-        response.request = req
-        response.connection = self
+        header = (
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: application/json\r\n"
+            f"Content-Length: {len(body)}\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+        ).encode("utf-8")
+        return header + body
 
-        return response
+
+    def build_auth_challenge(self):
+        """Builds a 401 challenge response for unauthorized requests."""
+        body = b'{"error": "Unauthorized"}'
+        header = (
+            "HTTP/1.1 401 Unauthorized\r\n"
+            "WWW-Authenticate: Basic realm=\"AsynapRous\"\r\n"
+            "Content-Type: application/json\r\n"
+            f"Content-Length: {len(body)}\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+        ).encode("utf-8")
+        return header + body
 
 
     # def get_connection(self, url, proxies=None):
@@ -283,14 +354,67 @@ class HttpAdapter:
         :rtype: dict
         """
         headers = {}
-        #
-        # TODO: build your authentication here
-        #       username, password =...
-        # we provide dummy auth here
-        #
-        username, password = ("user1", "password")
 
-        if username:
-            headers["Proxy-Authorization"] = (username, password)
+        from .utils import get_auth_from_url
+        username, password = get_auth_from_url(proxy)
+
+        if username and password:
+            credentials = f"{username}:{password}"
+            encoded = base64.b64encode(credentials.encode("utf-8")).decode("utf-8")
+            headers["Proxy-Authorization"] = f"Basic {encoded}"
 
         return headers
+    
+    def authenticate(self, req):
+        """
+        Authenticate a request using either Cookie session or Basic Auth.
+        Checks Cookie first, falls back to basic auth.
+        :param req: Request object
+        :rtype: dict - {"authenticated": bool, "username": str or None}
+        """
+
+        # --- Tries Cookies Auth first ---
+        cookies = self.extract_cookies
+        session_token = cookies.get("session", None)
+
+        if session_token:
+            username = SESSION_STORE.get(session_token)
+            if username:
+                return {"authenticated": True, "username": username}
+            
+        # --- Falls back to Basic Auth ---
+        headers = req.headers or {}
+        if not isinstance(headers, CaseInsensitiveDict):
+            headers = CaseInsensitiveDict(headers)
+
+        auth_header = headers.get("Authorization", "")
+
+        if auth_header.startswith("Basic "):
+            encoded = auth_header[len("Basic "):]
+            try:
+                decoded = base64.b64decode(encoded).decode("utf-8")
+                username, password = decoded.split(":", 1)
+                if self.validate_credentials(username, password):
+                    return {"authenticated": True, "username": username}
+            except Exception:
+                pass
+        return {"authenticated": False, "username": None}
+    
+    def register_user(username, password):
+        """Register a new user into the user database.
+        :param username: (str) The username to register.
+        :param password: (str) The password to store.
+        """
+        USER_DB[username] = password
+
+
+
+
+    def validate_credentials(self, username, password):
+        """Validate username and password against the in-memory user database.
+
+        :param username: (str) The username to check.
+        :param password: (str) The password to check.
+        :rtype: bool
+        """
+        return USER_DB.get(username) == password
