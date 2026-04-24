@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  backend1:
+    build: .
+    container_name: backend1
+    command: python -u backend1.py
+    ports:
+      - "9003:9001"
+    volumes:
+      - ./:/app
+    networks:
+      - weaprous-net
+
+  backend2:
+    build: .
+    container_name: backend2
+    command: python -u backend2.py
+    ports:
+      - "9002:9001"
+    volumes:
+      - ./:/app
+    networks:
+      - weaprous-net
+
+  proxy:
+    build: .
+    container_name: proxy
+    command: python -u start_proxy.py
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./:/app
+    networks:
+      - weaprous-net
+
+networks:
+  weaprous-net:
+    driver: bridge
