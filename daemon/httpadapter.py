@@ -106,19 +106,34 @@ class HttpAdapter:
         resp = self.response
 
         # Handle the request
-        msg = conn.recv(1024).decode()
+        msg = conn.recv(4096).decode()
+        if not msg:
+            conn.close()
+            return
+            
         req.prepare(msg, routes)
         print("[HttpAdapter] Invoke handle_client connection {}".format(addr))
 
+        response = b""
         # Handle request hook
         if req.hook:
-            #
-            # TODO: handle for App hook here
-            #
-            response = ""
+            handler = req.hook
+            kwargs = {
+                "headers": req.headers,
+                "body": req.body
+            }
+            if inspect.iscoroutinefunction(handler):
+                response_body = asyncio.run(handler(**kwargs))
+            else:
+                response_body = handler(**kwargs)
+            
+            response = resp.build_response(req, envelop_content=response_body)
+        else:
+            response = resp.build_response(req)
 
         #print("[HttpAdapter] Response content {}".format(response))
-        conn.sendall(response)
+        if response:
+            conn.sendall(response)
         conn.close()
 
     async def handle_client_coroutine(self, reader, writer):
@@ -129,38 +144,53 @@ class HttpAdapter:
         invokes the appropriate route handler if available, builds the response,
         and sends it back to the client.
 
-        :param conn (socket): The client socket connection.
-        :param addr (tuple): The client's address.
-        :param routes (dict): The route mapping for dispatching requests.
+        :param reader (StreamReader): The stream reader for the client socket.
+        :param writer (StreamWriter): The stream writer for the client socket.
         """
         # Request handler
         req = self.request
         # Response handler
         resp = self.response
 
-        print("[HttpAdapter] Invoke handle_client_coroutine connection {})".format(addr))
         addr = writer.get_extra_info("peername")
+        print("[HttpAdapter] Invoke handle_client_coroutine connection {}".format(addr))
 
-        # TODO Handle the request asynchronously
-        msg = await reader.read(1024)
+        # Handle the request asynchronously
+        try:
+            msg = await reader.read(4096)
+        except BlockingIOError:
+            # Handle BlockingIOError if it somehow occurs
+            await asyncio.sleep(0.01)
+            msg = await reader.read(4096)
 
+        if not msg:
+            return
 
-        req.prepare(msg.decode("utf-8"), routes={})
+        req.prepare(msg.decode("utf-8"), self.routes)
 
+        response = b""
         # Handle request hook
         if req.hook:
-            #
-            # TODO: handle for App hook here
-            #
-            response = ""
-
-        # Build response
-        #print("[HttpAdapter] Start **ASYNC** build_response with type {}".format(type(req)))
-        response = resp.build_response(req)
+            handler = req.hook
+            kwargs = {
+                "headers": req.headers,
+                "body": req.body
+            }
+            if inspect.iscoroutinefunction(handler):
+                response_body = await handler(**kwargs)
+            else:
+                response_body = handler(**kwargs)
+            
+            # Using envelop_content for app hooks as the existing structure implies
+            response = resp.build_response(req, envelop_content=response_body)
+        else:
+            # Build response for static files
+            response = resp.build_response(req)
 
         # Send all the response asynchronously
-        writer.write(response)
-        await writer.drain()
+        if response:
+            writer.write(response)
+            await writer.drain()
 
     @property
     def extract_cookies(self, req, resp):
