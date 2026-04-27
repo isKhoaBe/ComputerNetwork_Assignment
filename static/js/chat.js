@@ -1,3 +1,5 @@
+const TRACKER_BASE = "http://192.168.1.6:9000";
+
 const state = {
   username: localStorage.getItem("chat_username") || "guest",
   channel: "general",
@@ -29,7 +31,7 @@ function showToast(text) {
   setTimeout(() => toastEl.classList.add("hidden"), 1800);
 }
 
-async function api(path, method = "GET", payload = null) {
+async function api(base, path, method = "GET", payload = null) {
   const opts = {
     method,
     credentials: "include",
@@ -41,12 +43,12 @@ async function api(path, method = "GET", payload = null) {
     opts.body = JSON.stringify(payload);
   }
 
-  const resp = await fetch(path, opts);
+  const resp = await fetch(base + path, opts);
   const text = await resp.text();
 
   try {
     return JSON.parse(text);
-  } catch (err) {
+  } catch (_) {
     return { ok: resp.ok, raw: text };
   }
 }
@@ -112,7 +114,7 @@ function renderMessages(newMessages) {
 
 async function refreshPeers() {
   setStatus("Refreshing peers...");
-  const data = await api("/get-list", "GET");
+  const data = await api(TRACKER_BASE, "/get-list", "GET");
 
   if (data.ok && Array.isArray(data.peers)) {
     state.peers = data.peers.filter((p) => p.username !== state.username);
@@ -125,7 +127,7 @@ async function refreshPeers() {
 
 async function pollMessages() {
   const afterSeq = state.lastSeq[state.channel] || 0;
-  const data = await api("/messages", "POST", {
+  const data = await api("", "/messages", "POST", {
     channel: state.channel,
     after_seq: afterSeq
   });
@@ -146,7 +148,7 @@ async function sendDirect() {
   const message = inputEl.value.trim();
   if (!message) return;
 
-  const res = await api("/send-peer", "POST", {
+  const res = await api("", "/send-peer", "POST", {
     sender: state.username,
     channel: state.channel,
     message,
@@ -167,7 +169,7 @@ async function broadcastMessage() {
   const message = inputEl.value.trim();
   if (!message) return;
 
-  const res = await api("/broadcast-peer", "POST", {
+  const res = await api("", "/broadcast-peer", "POST", {
     sender: state.username,
     channel: state.channel,
     message,

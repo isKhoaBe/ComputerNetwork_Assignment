@@ -1,5 +1,6 @@
 import json
 import os
+import uuid
 
 from daemon import AsynapRous
 from apps.p2p_logic import P2PNode
@@ -9,10 +10,14 @@ app = AsynapRous()
 # tracker data
 active_peers = {}
 
+# simple in-memory sessions
+sessions = {}
+
 # app mode
 APP_MODE = os.environ.get("APP_MODE", "peer")   # "tracker" or "peer"
 APP_IP = os.environ.get("APP_IP", "127.0.0.1")
 P2P_PORT = int(os.environ.get("P2P_PORT", "9101"))
+INSTANCE_ID = os.environ.get("INSTANCE_ID", "unknown")
 
 # start local p2p node only for peer mode
 node = None
@@ -21,18 +26,59 @@ if APP_MODE != "tracker":
     node.start_background()
 
 
-def build_http_response(json_data, status="200 OK"):
+def build_http_response(json_data, status="200 OK", extra_headers=None):
     body_bytes = json.dumps(json_data).encode("utf-8")
-    response = (
-        f"HTTP/1.1 {status}\r\n"
-        "Content-Type: application/json\r\n"
-        "Access-Control-Allow-Origin: *\r\n"
-        "Access-Control-Allow-Headers: Content-Type\r\n"
-        "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
-        f"Content-Length: {len(body_bytes)}\r\n"
-        "\r\n"
-    ).encode("utf-8") + body_bytes
+
+    headers = [
+        f"HTTP/1.1 {status}",
+        "Content-Type: application/json",
+        "Access-Control-Allow-Origin: *",
+        "Access-Control-Allow-Headers: Content-Type, Cookie",
+        "Access-Control-Allow-Methods: GET, POST, OPTIONS",
+        f"Content-Length: {len(body_bytes)}",
+    ]
+
+    if extra_headers:
+        for k, v in extra_headers.items():
+            headers.append(f"{k}: {v}")
+
+    response = ("\r\n".join(headers) + "\r\n\r\n").encode("utf-8") + body_bytes
     return response
+
+
+def _json_body(body, default=None):
+    if default is None:
+        default = {}
+    if body is None:
+        return default
+    if isinstance(body, (bytes, bytearray)):
+        body = body.decode("utf-8", errors="replace")
+    if isinstance(body, str):
+        body = body.strip()
+        if not body:
+            return default
+        return json.loads(body)
+    if isinstance(body, dict):
+        return body
+    return default
+
+
+def _header_get(headers, key, default=""):
+    try:
+        return headers.get(key, default) or default
+    except Exception:
+        return default
+
+
+def _get_cookie(headers, name):
+    cookie_header = _header_get(headers, "Cookie", "")
+    for part in cookie_header.split(";"):
+        part = part.strip()
+        if "=" in part:
+            k, v = part.split("=", 1)
+            if k.strip() == name:
+                return v.strip()
+    return None
 
 
 @app.route('/self-info', methods=['GET'])
@@ -45,13 +91,24 @@ def self_info(headers="guest", body="anonymous"):
     })
 
 
+@app.route('/instance', methods=['GET'])
+def instance(headers="guest", body="anonymous"):
+    return build_http_response({
+        "ok": True,
+        "instance": INSTANCE_ID,
+        "ip": APP_IP,
+        "p2p_port": P2P_PORT,
+        "mode": APP_MODE
+    })
+
+
 # -------------------------
 # tracker logic
 # -------------------------
 @app.route('/submit-info', methods=['POST'])
 def submit_info(headers="guest", body="anonymous"):
     try:
-        peer_info = json.loads(body)
+        peer_info = _json_body(body, {})
         username = peer_info.get("username")
         ip = peer_info.get("ip")
         port = peer_info.get("port")
@@ -64,7 +121,7 @@ def submit_info(headers="guest", body="anonymous"):
             data = {"ok": True, "message": f"peer {username} registered"}
         else:
             data = {"ok": False, "error": "missing username/ip/port"}
-    except json.JSONDecodeError:
+    except Exception:
         data = {"ok": False, "error": "invalid JSON"}
 
     return build_http_response(data)
@@ -87,10 +144,10 @@ def get_list(headers="guest", body="anonymous"):
 @app.route("/connect-peer", methods=["POST"])
 def connect_peer(headers="guest", body="anonymous"):
     try:
-        req = json.loads(body)
+        req = _json_body(body, {})
         sender = req.get("from")
         data = {"ok": True, "status": "connected", "message": f"hello {sender}, I'm ready!"}
-    except json.JSONDecodeError:
+    except Exception:
         data = {"ok": False, "error": "invalid JSON format"}
     return build_http_response(data)
 
@@ -104,7 +161,7 @@ def messages(headers="guest", body="{}"):
         return build_http_response({"ok": False, "error": "messages not available on tracker mode"})
 
     try:
-        data = json.loads(body or "{}")
+        data = _json_body(body, {})
         channel = data.get("channel", "general")
         after_seq = int(data.get("after_seq", 0))
         return build_http_response(node.get_messages(channel=channel, after_seq=after_seq))
@@ -118,10 +175,10 @@ def send_peer(headers="guest", body="anonymous"):
         return build_http_response({"ok": False, "error": "send-peer not available on tracker mode"})
 
     try:
-        msg_data = json.loads(body)
+        msg_data = _json_body(body, {})
         sender = msg_data.get("sender")
         channel = msg_data.get("channel", "general")
-        message = msg_data.get("message", "").strip()
+        message = str(msg_data.get("message", "")).strip()
         ip = msg_data.get("ip")
         port = int(msg_data.get("port", 0))
 
@@ -148,10 +205,10 @@ def broadcast_peer(headers="guest", body="anonymous"):
         return build_http_response({"ok": False, "error": "broadcast-peer not available on tracker mode"})
 
     try:
-        msg_data = json.loads(body)
+        msg_data = _json_body(body, {})
         sender = msg_data.get("sender")
         channel = msg_data.get("channel", "general")
-        message = msg_data.get("message", "").strip()
+        message = str(msg_data.get("message", "")).strip()
         peers = msg_data.get("peers", [])
 
         if not message:
@@ -169,30 +226,69 @@ def broadcast_peer(headers="guest", body="anonymous"):
 
 
 # -------------------------
-# login
+# auth + cookie session
 # -------------------------
 @app.route('/login', methods=['POST'])
 def login(headers="guest", body="anonymous"):
     try:
-        msg_data = json.loads(str(body))
+        msg_data = _json_body(body, {})
         username = msg_data.get("username")
         password = msg_data.get("password")
 
         if username and password:
+            session_id = str(uuid.uuid4())
+            sessions[session_id] = username
+
             data = {
                 "ok": True,
                 "message": "login success",
                 "username": username
             }
-        else:
-            data = {
-                "ok": False,
-                "error": "invalid username or password"
-            }
-    except Exception:
-        data = {"ok": False, "error": "invalid request"}
 
-    return build_http_response(data)
+            return build_http_response(
+                data,
+                extra_headers={
+                    "Set-Cookie": f"session_id={session_id}; Path=/; HttpOnly"
+                }
+            )
+        else:
+            data = {"ok": False, "error": "invalid username or password"}
+            return build_http_response(data, status="401 Unauthorized")
+    except Exception as exc:
+        print(f"[login] parse error: {exc}")
+        data = {"ok": False, "error": "invalid request"}
+        return build_http_response(data, status="400 Bad Request")
+
+
+@app.route('/me', methods=['GET'])
+def me(headers="guest", body="anonymous"):
+    session_id = _get_cookie(headers, "session_id")
+    username = sessions.get(session_id)
+
+    if not username:
+        return build_http_response(
+            {"ok": False, "error": "unauthorized"},
+            status="401 Unauthorized"
+        )
+
+    return build_http_response({
+        "ok": True,
+        "username": username
+    })
+
+
+@app.route('/logout', methods=['POST'])
+def logout(headers="guest", body="anonymous"):
+    session_id = _get_cookie(headers, "session_id")
+    if session_id in sessions:
+        del sessions[session_id]
+
+    return build_http_response(
+        {"ok": True, "message": "logout success"},
+        extra_headers={
+            "Set-Cookie": "session_id=deleted; Path=/; Max-Age=0"
+        }
+    )
 
 
 def create_sampleapp(ip, port, mode="peer"):
