@@ -1,0 +1,71 @@
+### ==========================================
+### PHASE 1: LOGIN & TRACKING (Cổng 8000)
+### ==========================================
+
+### 1. Alice Đăng nhập
+POST http://127.0.0.1:8000/login
+Content-Type: application/json
+
+{
+    "username": "alice",
+    "password": "password123"
+}
+
+###
+
+### 2. Alice báo danh IP/Port
+POST http://127.0.0.1:8000/submit-info
+Content-Type: application/json
+
+{
+    "username": "alice",
+    "ip": "127.0.0.1",
+    "port": 9101
+}
+
+###
+
+### 3. Bob Đăng nhập và báo danh
+POST http://127.0.0.1:8000/submit-info
+Content-Type: application/json
+
+{
+    "username": "bob",
+    "ip": "127.0.0.1",
+    "port": 9102
+}
+
+###
+
+### 4. Bob xin danh bạ
+GET http://127.0.0.1:8000/get-list
+Content-Type: application/json
+
+
+### ==========================================
+### PHASE 2: CHAT P2P TRỰC TIẾP
+### ==========================================
+
+### 5. Bob gửi tin nhắn cho Alice (Bắn vào cổng 9101)
+POST http://127.0.0.1:9101/send-peer
+Content-Type: application/json
+
+{
+    "sender": "bob",
+    "channel": "general",
+    "ip": "127.0.0.1",
+    "port": 9102,
+    "message": "Hey Alice, are you there!"
+}
+
+### 6. Alice response to Bob
+POST http://127.0.0.1:9102/send-peer 
+Content-Type: application/json
+
+{
+    "sender": "alice",
+    "channel": "general",
+    "ip" : "127.0.0.1",
+    "port": 9101,
+    "message": "yes Bob, I'm here" 
+}

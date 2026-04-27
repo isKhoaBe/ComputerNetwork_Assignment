@@ -1,21 +1,44 @@
-<!doctype html>
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
-    <title>bksysnet@hcmut welcome</title>
-
-    <meta charset="utf-8" />
-    <meta http-equiv="Content-type" content="text/html; charset=utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <link rel="stylesheet" href="css/styles.css" />
+  <meta charset="utf-8" />
+  <title>P2P Chat</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="/static/css/chat.css" />
 </head>
-
 <body>
-<div>
-    <h1>bksysnet@hcmut  Domain</h1>
-    <p>This domain is for use in illustrative examples in documents.
-    </p>
-  
-       <img src="images/welcome.png" alt="bksysnet at HCMUT" width="500" height="600">  
-</div>
+  <div class="app">
+    <aside class="sidebar">
+      <h2>Channels</h2>
+      <div id="channels" class="list">
+        <button class="channel active" data-channel="general"># general</button>
+        <button class="channel" data-channel="team1"># team1</button>
+      </div>
+
+      <h2>Peers</h2>
+      <div id="peerList" class="list"></div>
+
+      <button id="refreshPeersBtn">Refresh Peers</button>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>User: <strong id="currentUser"></strong></div>
+        <div id="statusText">Ready</div>
+      </header>
+
+      <section id="messages" class="messages"></section>
+
+      <div id="toast" class="toast hidden"></div>
+
+      <footer class="composer">
+        <input id="messageInput" type="text" placeholder="Type message..." />
+        <button id="sendBtn">Send to selected peer</button>
+        <button id="broadcastBtn">Broadcast channel</button>
+      </footer>
+    </main>
+  </div>
+
+  <script src="/static/js/chat.js"></script>
 </body>
 </html>
