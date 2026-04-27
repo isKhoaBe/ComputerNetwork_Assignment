@@ -132,4 +132,8 @@ body {
 
 .hidden {
   display: none;
+}.empty-chat {
+  color: #666;
+  padding: 16px;
+  font-style: italic;
 }

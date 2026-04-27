@@ -136,7 +136,7 @@ def get_list(headers="guest", body="anonymous"):
     data = {
         "ok": True,
         "peers": peer_list,
-        "channels": ["general", "team1"]
+        "channels": ["general"]
     }
     return build_http_response(data)
 

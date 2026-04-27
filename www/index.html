@@ -12,7 +12,6 @@
       <h2>Channels</h2>
       <div id="channels" class="list">
         <button class="channel active" data-channel="general"># general</button>
-        <button class="channel" data-channel="team1"># team1</button>
       </div>
 
       <h2>Peers</h2>
@@ -24,7 +23,7 @@
     <main class="main">
       <header class="topbar">
         <div>User: <strong id="currentUser"></strong></div>
-        <div id="statusText">Ready</div>
+        <div id="statusText">Mode: Broadcast to #general</div>
       </header>
 
       <section id="messages" class="messages"></section>
@@ -32,9 +31,8 @@
       <div id="toast" class="toast hidden"></div>
 
       <footer class="composer">
-        <input id="messageInput" type="text" placeholder="Type message..." />
-        <button id="sendBtn">Send to selected peer</button>
-        <button id="broadcastBtn">Broadcast channel</button>
+        <input id="messageInput" type="text" placeholder="Broadcast to #general..." />
+        <button id="actionBtn">Broadcast</button>
       </footer>
     </main>
   </div>
