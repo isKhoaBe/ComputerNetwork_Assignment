@@ -7,19 +7,34 @@ from apps.p2p_logic import P2PNode
 
 app = AsynapRous()
 
+# -------------------------
 # tracker data
+# -------------------------
 active_peers = {}
 
-# simple in-memory sessions
+# -------------------------
+# auth/session
+# -------------------------
 sessions = {}
 
+USERS = {
+    "alice": "123",
+    "bob": "123",
+    "charlie": "123",
+    "dave": "123",
+}
+
+# -------------------------
 # app mode
+# -------------------------
 APP_MODE = os.environ.get("APP_MODE", "peer")   # "tracker" or "peer"
 APP_IP = os.environ.get("APP_IP", "127.0.0.1")
 P2P_PORT = int(os.environ.get("P2P_PORT", "9101"))
 INSTANCE_ID = os.environ.get("INSTANCE_ID", "unknown")
 
-# start local p2p node only for peer mode
+# -------------------------
+# local p2p node
+# -------------------------
 node = None
 if APP_MODE != "tracker":
     node = P2PNode(listen_host="0.0.0.0", listen_port=P2P_PORT)
@@ -49,17 +64,22 @@ def build_http_response(json_data, status="200 OK", extra_headers=None):
 def _json_body(body, default=None):
     if default is None:
         default = {}
+
     if body is None:
         return default
+
     if isinstance(body, (bytes, bytearray)):
         body = body.decode("utf-8", errors="replace")
+
     if isinstance(body, str):
         body = body.strip()
         if not body:
             return default
         return json.loads(body)
+
     if isinstance(body, dict):
         return body
+
     return default
 
 
@@ -153,7 +173,7 @@ def connect_peer(headers="guest", body="anonymous"):
 
 
 # -------------------------
-# local peer routes -> call p2p node
+# local peer routes
 # -------------------------
 @app.route('/messages', methods=['POST'])
 def messages(headers="guest", body="{}"):
@@ -226,38 +246,49 @@ def broadcast_peer(headers="guest", body="anonymous"):
 
 
 # -------------------------
-# auth + cookie session
+# auth + session
 # -------------------------
 @app.route('/login', methods=['POST'])
 def login(headers="guest", body="anonymous"):
     try:
         msg_data = _json_body(body, {})
-        username = msg_data.get("username")
-        password = msg_data.get("password")
+        username = str(msg_data.get("username", "")).strip()
+        password = str(msg_data.get("password", "")).strip()
 
-        if username and password:
-            session_id = str(uuid.uuid4())
-            sessions[session_id] = username
+        expected_password = USERS.get(username)
 
-            data = {
+        if not username or not password:
+            return build_http_response(
+                {"ok": False, "error": "missing username or password"},
+                status="400 Bad Request"
+            )
+
+        if expected_password is None or expected_password != password:
+            return build_http_response(
+                {"ok": False, "error": "invalid username or password"},
+                status="401 Unauthorized"
+            )
+
+        session_id = str(uuid.uuid4())
+        sessions[session_id] = username
+
+        return build_http_response(
+            {
                 "ok": True,
                 "message": "login success",
                 "username": username
+            },
+            extra_headers={
+                "Set-Cookie": f"session_id={session_id}; Path=/; HttpOnly"
             }
+        )
 
-            return build_http_response(
-                data,
-                extra_headers={
-                    "Set-Cookie": f"session_id={session_id}; Path=/; HttpOnly"
-                }
-            )
-        else:
-            data = {"ok": False, "error": "invalid username or password"}
-            return build_http_response(data, status="401 Unauthorized")
     except Exception as exc:
         print(f"[login] parse error: {exc}")
-        data = {"ok": False, "error": "invalid request"}
-        return build_http_response(data, status="400 Bad Request")
+        return build_http_response(
+            {"ok": False, "error": "invalid request"},
+            status="400 Bad Request"
+        )
 
 
 @app.route('/me', methods=['GET'])

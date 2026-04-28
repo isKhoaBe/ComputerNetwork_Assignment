@@ -6,6 +6,7 @@
 </head>
 <body>
   <h1>Login</h1>
+
   <input id="username" placeholder="Username" />
   <input id="password" type="password" placeholder="Password" />
   <button id="loginBtn">Login</button>
@@ -27,11 +28,11 @@
       let data = {};
       try { data = JSON.parse(text); } catch (_) {}
 
-      if (resp.ok || data.ok) {
-        localStorage.setItem("chat_username", username);
+      if (resp.ok && data.ok) {
         window.location.href = "/index.html";
       } else {
-        document.getElementById("status").textContent = "Login failed";
+        document.getElementById("status").textContent =
+          data.error || "Login failed";
       }
     });
   </script>

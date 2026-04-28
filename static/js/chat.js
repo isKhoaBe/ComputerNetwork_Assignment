@@ -1,7 +1,7 @@
 const TRACKER_BASE = "http://127.0.0.1:9000";
 
 const state = {
-  username: localStorage.getItem("chat_username") || "guest",
+  username: "",
   channel: "general",
   peers: [],
   selectedPeer: null,
@@ -10,8 +10,6 @@ const state = {
   unseenCount: 0,
   polling: false,
 
-  // Mỗi view là 1 "cửa sổ chat" riêng
-  // channel:general, peer:alice, peer:bob, ...
   currentView: "channel:general",
   views: {
     "channel:general": []
@@ -25,8 +23,7 @@ const messagesEl = document.getElementById("messages");
 const toastEl = document.getElementById("toast");
 const inputEl = document.getElementById("messageInput");
 const actionBtn = document.getElementById("actionBtn");
-
-currentUserEl.textContent = state.username;
+const logoutBtn = document.getElementById("logoutBtn");
 
 function setStatus(text) {
   statusTextEl.textContent = text;
@@ -36,6 +33,42 @@ function showToast(text) {
   toastEl.textContent = text;
   toastEl.classList.remove("hidden");
   setTimeout(() => toastEl.classList.add("hidden"), 1800);
+}
+
+async function requireLogin() {
+  try {
+    const resp = await fetch("/me", {
+      method: "GET",
+      credentials: "include"
+    });
+
+    const text = await resp.text();
+    let data = {};
+    try { data = JSON.parse(text); } catch (_) {}
+
+    if (!resp.ok || !data.ok || !data.username) {
+      window.location.href = "/login.html";
+      return false;
+    }
+
+    state.username = data.username;
+    currentUserEl.textContent = state.username;
+    return true;
+  } catch (err) {
+    window.location.href = "/login.html";
+    return false;
+  }
+}
+
+async function logout() {
+  try {
+    await fetch("/logout", {
+      method: "POST",
+      credentials: "include"
+    });
+  } catch (_) {}
+
+  window.location.href = "/login.html";
 }
 
 function getChannelViewKey(channel) {
@@ -268,7 +301,6 @@ function routeIncomingMessage(msg) {
     };
   }
 
-  // direct message
   if (msg.direction === "in") {
     const fromUser = msg.from || "unknown";
     return {
@@ -277,9 +309,6 @@ function routeIncomingMessage(msg) {
     };
   }
 
-  // direct outgoing polled back from local server:
-  // chỉ hiển thị nếu current view đang là peer có liên quan thì ta bỏ qua,
-  // vì local outgoing đã được thêm ngay lúc sendDirect().
   return null;
 }
 
@@ -371,9 +400,6 @@ async function broadcastMessage() {
   if (res.ok) {
     inputEl.value = "";
     setStatus(`Broadcast sent to #${state.channel}`);
-
-    // KHONG add local message o day nua
-    // De pollMessages() nhan 1 ban broadcast tu server roi render 1 lan duy nhat
     await pollMessages();
   } else {
     showToast(res.error || "Broadcast failed");
@@ -402,6 +428,9 @@ function bindChannels() {
 
 document.getElementById("refreshPeersBtn").addEventListener("click", refreshPeers);
 actionBtn.addEventListener("click", handleMainAction);
+if (logoutBtn) {
+  logoutBtn.addEventListener("click", logout);
+}
 
 inputEl.addEventListener("keydown", (e) => {
   if (e.key === "Enter") {
@@ -416,10 +445,15 @@ document.addEventListener("visibilitychange", () => {
   }
 });
 
-bindChannels();
-updateModeUI();
-refreshPeers();
-renderCurrentView();
-pollMessages();
-setInterval(refreshPeers, 5000);
-setInterval(pollMessages, 1000);
+(async function initApp() {
+  const ok = await requireLogin();
+  if (!ok) return;
+
+  bindChannels();
+  updateModeUI();
+  refreshPeers();
+  renderCurrentView();
+  pollMessages();
+  setInterval(refreshPeers, 5000);
+  setInterval(pollMessages, 1000);
+})();

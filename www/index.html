@@ -3,39 +3,40 @@
 <head>
   <meta charset="utf-8" />
   <title>P2P Chat</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="/static/css/chat.css" />
 </head>
 <body>
   <div class="app">
     <aside class="sidebar">
       <h2>Channels</h2>
-      <div id="channels" class="list">
+      <div class="list">
         <button class="channel active" data-channel="general"># general</button>
       </div>
 
       <h2>Peers</h2>
       <div id="peerList" class="list"></div>
-
       <button id="refreshPeersBtn">Refresh Peers</button>
     </aside>
 
     <main class="main">
-      <header class="topbar">
+      <div class="topbar">
         <div>User: <strong id="currentUser"></strong></div>
-        <div id="statusText">Mode: Broadcast to #general</div>
-      </header>
+        <div style="display:flex; gap:12px; align-items:center;">
+          <span id="statusText">Ready</span>
+          <button id="logoutBtn">Logout</button>
+        </div>
+      </div>
 
-      <section id="messages" class="messages"></section>
+      <div id="messages" class="messages"></div>
 
-      <div id="toast" class="toast hidden"></div>
-
-      <footer class="composer">
-        <input id="messageInput" type="text" placeholder="Broadcast to #general..." />
+      <div class="inputbar">
+        <input id="messageInput" type="text" placeholder="Type message..." />
         <button id="actionBtn">Broadcast</button>
-      </footer>
+      </div>
     </main>
   </div>
+
+  <div id="toast" class="toast hidden"></div>
 
   <script src="/static/js/chat.js"></script>
 </body>
