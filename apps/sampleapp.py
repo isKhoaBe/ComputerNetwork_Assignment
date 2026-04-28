@@ -11,7 +11,7 @@ app = AsynapRous()
 # tracker data
 # -------------------------
 active_peers = {}
-
+active_channels = ["general", "team1"]
 # -------------------------
 # auth/session
 # -------------------------
@@ -146,6 +146,20 @@ def submit_info(headers="guest", body="anonymous"):
 
     return build_http_response(data)
 
+@app.route('/add-list', methods=['POST'])
+def add_list(headers="guest", body="anonymous"):
+    try:
+        msg_data = _json_body(body, {})
+        new_channel = msg_data.get("channel")
+        if new_channel:
+            if new_channel not in active_channels:
+                active_channels.append(new_channel)
+            data = {"ok": True, "message": f"Channel '{new_channel}' added"}
+        else:
+            data = {"ok": False, "error": "Missing channel name"}
+    except Exception:
+        data = {"ok": False, "error": "invalid request"}
+    return build_http_response(data)
 
 @app.route('/get-list', methods=['GET'])
 def get_list(headers="guest", body="anonymous"):
@@ -156,7 +170,7 @@ def get_list(headers="guest", body="anonymous"):
     data = {
         "ok": True,
         "peers": peer_list,
-        "channels": ["general"]
+        "channels": active_channels 
     }
     return build_http_response(data)
 
@@ -165,8 +179,12 @@ def get_list(headers="guest", body="anonymous"):
 def connect_peer(headers="guest", body="anonymous"):
     try:
         req = _json_body(body, {})
-        sender = req.get("from")
-        data = {"ok": True, "status": "connected", "message": f"hello {sender}, I'm ready!"}
+        # Đổi "from" thành "target_username"
+        target = req.get("target_username") 
+        if target:
+            data = {"ok": True, "status": "connected", "message": f"hello {target}, I'm ready!"}
+        else:
+            data = {"ok": False, "error": "missing target_username"}
     except Exception:
         data = {"ok": False, "error": "invalid JSON format"}
     return build_http_response(data)
@@ -321,6 +339,13 @@ def logout(headers="guest", body="anonymous"):
         }
     )
 
+@app.route('/greeting', methods=['PUT'])
+def greeting(headers="guest", body="anonymous"):
+    return build_http_response({"ok": True, "message": "Framework ho tro PUT thanh cong!"})
+
+@app.route('/remove-peer', methods=['DELETE'])
+def delete_peer(headers="guest", body="anonymous"):
+    return build_http_response({"ok": True, "message": "Framework ho tro DELETE thanh cong!"})
 
 def create_sampleapp(ip, port, mode="peer"):
     print("=" * 40)

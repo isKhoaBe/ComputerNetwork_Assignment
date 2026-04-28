@@ -80,7 +80,7 @@ $env:APP_MODE="peer"
 $env:APP_IP="127.0.0.1"
 $env:P2P_PORT="9102"
 $env:INSTANCE_ID="bob"
-py start_sampleapp.py --server-ip 127.0.0.1 --server-port 9002 --mode peer
+py start_sampleapp.py --server-ip 127.0.0.1 --server-port 9002 --p2p-port 9102 --mode peer
 ```
 
 ### Charlie
@@ -89,7 +89,7 @@ $env:APP_MODE="peer"
 $env:APP_IP="127.0.0.1"
 $env:P2P_PORT="9103"
 $env:INSTANCE_ID="charlie"
-py start_sampleapp.py --server-ip 127.0.0.1 --server-port 9003 --mode peer
+py start_sampleapp.py --server-ip 127.0.0.1 --server-port 9003 --p2p-port 9103 --mode peer
 ```
 
 ### Dave
