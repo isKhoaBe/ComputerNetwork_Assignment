@@ -71,7 +71,7 @@ $env:APP_MODE="peer"
 $env:APP_IP="127.0.0.1"
 $env:P2P_PORT="9101"
 $env:INSTANCE_ID="alice"
-py start_sampleapp.py --server-ip 127.0.0.1 --server-port 9001 --mode peer
+py start_sampleapp.py --server-ip 127.0.0.1 --server-port 9001 --p2p-port 9101 --mode peer
 ```
 
 ### Bob
@@ -98,7 +98,7 @@ $env:APP_MODE="peer"
 $env:APP_IP="127.0.0.1"
 $env:P2P_PORT="9104"
 $env:INSTANCE_ID="dave"
-py start_sampleapp.py --server-ip 127.0.0.1 --server-port 9004 --mode peer
+py start_sampleapp.py --server-ip 127.0.0.1 --server-port 9004 --p2p-port 9104 --mode peer
 ```
 
 Kiểm tra port đã lên:
