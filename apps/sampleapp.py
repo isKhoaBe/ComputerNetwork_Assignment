@@ -3,18 +3,13 @@ import os
 import uuid
 
 from daemon import AsynapRous
-from apps.p2p_logic import P2PNode
+from apps.p2p_logic import P2PNode, ALL_MESSAGES_CHANNEL
 
 app = AsynapRous()
 
-# -------------------------
-# tracker data
-# -------------------------
 active_peers = {}
 active_channels = ["general", "team1"]
-# -------------------------
-# auth/session
-# -------------------------
+
 sessions = {}
 
 USERS = {
@@ -24,17 +19,11 @@ USERS = {
     "dave": "123",
 }
 
-# -------------------------
-# app mode
-# -------------------------
-APP_MODE = os.environ.get("APP_MODE", "peer")   # "tracker" or "peer"
+APP_MODE = os.environ.get("APP_MODE", "peer")
 APP_IP = os.environ.get("APP_IP", "127.0.0.1")
 P2P_PORT = int(os.environ.get("P2P_PORT", "9101"))
 INSTANCE_ID = os.environ.get("INSTANCE_ID", "unknown")
 
-# -------------------------
-# local p2p node
-# -------------------------
 node = None
 if APP_MODE != "tracker":
     node = P2PNode(listen_host="0.0.0.0", listen_port=P2P_PORT)
@@ -122,9 +111,6 @@ def instance(headers="guest", body="anonymous"):
     })
 
 
-# -------------------------
-# tracker logic
-# -------------------------
 @app.route('/submit-info', methods=['POST'])
 def submit_info(headers="guest", body="anonymous"):
     try:
@@ -146,6 +132,7 @@ def submit_info(headers="guest", body="anonymous"):
 
     return build_http_response(data)
 
+
 @app.route('/add-list', methods=['POST'])
 def add_list(headers="guest", body="anonymous"):
     try:
@@ -161,6 +148,7 @@ def add_list(headers="guest", body="anonymous"):
         data = {"ok": False, "error": "invalid request"}
     return build_http_response(data)
 
+
 @app.route('/get-list', methods=['GET'])
 def get_list(headers="guest", body="anonymous"):
     peer_list = [
@@ -170,7 +158,7 @@ def get_list(headers="guest", body="anonymous"):
     data = {
         "ok": True,
         "peers": peer_list,
-        "channels": active_channels 
+        "channels": active_channels
     }
     return build_http_response(data)
 
@@ -179,8 +167,7 @@ def get_list(headers="guest", body="anonymous"):
 def connect_peer(headers="guest", body="anonymous"):
     try:
         req = _json_body(body, {})
-        # Đổi "from" thành "target_username"
-        target = req.get("target_username") 
+        target = req.get("target_username")
         if target:
             data = {"ok": True, "status": "connected", "message": f"hello {target}, I'm ready!"}
         else:
@@ -190,9 +177,6 @@ def connect_peer(headers="guest", body="anonymous"):
     return build_http_response(data)
 
 
-# -------------------------
-# local peer routes
-# -------------------------
 @app.route('/messages', methods=['POST'])
 def messages(headers="guest", body="{}"):
     if node is None:
@@ -200,7 +184,7 @@ def messages(headers="guest", body="{}"):
 
     try:
         data = _json_body(body, {})
-        channel = data.get("channel", "general")
+        channel = data.get("channel", ALL_MESSAGES_CHANNEL)
         after_seq = int(data.get("after_seq", 0))
         return build_http_response(node.get_messages(channel=channel, after_seq=after_seq))
     except Exception as exc:
@@ -215,7 +199,8 @@ def send_peer(headers="guest", body="anonymous"):
     try:
         msg_data = _json_body(body, {})
         sender = msg_data.get("sender")
-        channel = msg_data.get("channel", "general")
+        receiver = msg_data.get("to")
+        channel = msg_data.get("channel", "")
         message = str(msg_data.get("message", "")).strip()
         ip = msg_data.get("ip")
         port = int(msg_data.get("port", 0))
@@ -224,9 +209,12 @@ def send_peer(headers="guest", body="anonymous"):
             return build_http_response({"ok": False, "error": "empty message"})
         if not ip or not port:
             return build_http_response({"ok": False, "error": "missing peer ip/port"})
+        if not receiver:
+            return build_http_response({"ok": False, "error": "missing peer username"})
 
         result = node.send_direct_sync(
             sender=sender,
+            to=receiver,
             ip=ip,
             port=port,
             channel=channel,
@@ -263,9 +251,6 @@ def broadcast_peer(headers="guest", body="anonymous"):
         return build_http_response({"ok": False, "error": str(exc)})
 
 
-# -------------------------
-# auth + session
-# -------------------------
 @app.route('/login', methods=['POST'])
 def login(headers="guest", body="anonymous"):
     try:
@@ -339,13 +324,16 @@ def logout(headers="guest", body="anonymous"):
         }
     )
 
+
 @app.route('/greeting', methods=['PUT'])
 def greeting(headers="guest", body="anonymous"):
     return build_http_response({"ok": True, "message": "Framework ho tro PUT thanh cong!"})
 
+
 @app.route('/remove-peer', methods=['DELETE'])
 def delete_peer(headers="guest", body="anonymous"):
     return build_http_response({"ok": True, "message": "Framework ho tro DELETE thanh cong!"})
+
 
 def create_sampleapp(ip, port, mode="peer"):
     print("=" * 40)

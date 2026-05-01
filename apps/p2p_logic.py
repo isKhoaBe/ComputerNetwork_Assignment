@@ -10,6 +10,9 @@ from collections import defaultdict
 from typing import Any, Dict, List, Optional
 
 
+ALL_MESSAGES_CHANNEL = "__all__"
+
+
 class P2PNode:
     def __init__(self, listen_host: str = "0.0.0.0", listen_port: int = 9101) -> None:
         self.listen_host = listen_host
@@ -25,9 +28,6 @@ class P2PNode:
         self._seen_ids: set[str] = set()
         self._seq = 0
 
-    # -------------------------
-    # lifecycle
-    # -------------------------
     def start_background(self) -> None:
         if self._thread and self._thread.is_alive():
             return
@@ -58,9 +58,11 @@ class P2PNode:
             raise RuntimeError("P2P event loop not running")
         return self._loop
 
-    # -------------------------
-    # incoming
-    # -------------------------
+    def _build_dm_channel(self, user_a: str, user_b: str) -> str:
+        left = str(user_a or "").strip()
+        right = str(user_b or "").strip()
+        return f"dm:{':'.join(sorted([left, right]))}"
+
     async def _handle_peer_connection(
         self,
         reader: asyncio.StreamReader,
@@ -83,7 +85,7 @@ class P2PNode:
                     continue
 
                 msg_type = payload.get("type")
-                if msg_type not in {"chat", "broadcast"}:
+                if msg_type not in {"direct", "broadcast"}:
                     print(f"[P2P] skip unsupported message type: {msg_type}")
                     continue
 
@@ -93,9 +95,6 @@ class P2PNode:
             with contextlib.suppress(Exception):
                 await writer.wait_closed()
 
-    # -------------------------
-    # local storage
-    # -------------------------
     def _next_seq_unlocked(self) -> int:
         self._seq += 1
         return self._seq
@@ -110,29 +109,46 @@ class P2PNode:
                 return None
             self._seen_ids.add(msg_id)
 
+            msg_type = payload.get("type", "direct")
+            sender = payload.get("from", "unknown")
+            receiver = payload.get("to")
             channel = payload.get("channel", "general")
+
+            if msg_type == "direct":
+                channel = self._build_dm_channel(sender, receiver)
+
             msg = {
                 "seq": self._next_seq_unlocked(),
                 "id": msg_id,
-                "type": payload.get("type", "chat"),
+                "type": msg_type,
                 "channel": channel,
-                "from": payload.get("from", "unknown"),
+                "from": sender,
+                "to": receiver,
                 "text": payload.get("text", ""),
                 "ts": payload.get("ts", int(time.time())),
                 "direction": direction,
             }
             print(
                 f"[P2P] store message channel={channel} "
-                f"from={msg['from']} text={msg['text']} direction={direction}"
+                f"type={msg_type} from={msg['from']} to={msg.get('to')} "
+                f"text={msg['text']} direction={direction}"
             )
             self._messages[channel].append(msg)
             return msg
 
-    def get_messages(self, channel: str = "general", after_seq: int = 0) -> Dict[str, Any]:
+    def get_messages(self, channel: str = ALL_MESSAGES_CHANNEL, after_seq: int = 0) -> Dict[str, Any]:
         with self._lock:
-            all_msgs = list(self._messages.get(channel, []))
-            new_msgs = [m for m in all_msgs if m["seq"] > int(after_seq)]
-            last_seq = all_msgs[-1]["seq"] if all_msgs else 0
+            if channel == ALL_MESSAGES_CHANNEL:
+                all_msgs: List[Dict[str, Any]] = []
+                for bucket in self._messages.values():
+                    all_msgs.extend(bucket)
+                all_msgs.sort(key=lambda item: item["seq"])
+                new_msgs = [m for m in all_msgs if m["seq"] > int(after_seq)]
+                last_seq = all_msgs[-1]["seq"] if all_msgs else 0
+            else:
+                all_msgs = list(self._messages.get(channel, []))
+                new_msgs = [m for m in all_msgs if m["seq"] > int(after_seq)]
+                last_seq = all_msgs[-1]["seq"] if all_msgs else 0
 
         return {
             "ok": True,
@@ -141,13 +157,9 @@ class P2PNode:
             "last_seq": last_seq,
         }
 
-    # -------------------------
-    # outgoing
-    # -------------------------
     async def _send_json(self, ip: str, port: int, payload: Dict[str, Any]) -> None:
         reader, writer = await asyncio.open_connection(ip, int(port))
 
-        # IMPORTANT: must be a real newline, not "\\n"
         raw = json.dumps(payload) + "\n"
         print(f"[P2P] raw send -> {raw.strip()}")
         writer.write(raw.encode("utf-8"))
@@ -159,16 +171,20 @@ class P2PNode:
     def send_direct_sync(
         self,
         sender: str,
+        to: str,
         ip: str,
         port: int,
         channel: str,
         text: str,
     ) -> Dict[str, Any]:
+        dm_channel = channel or self._build_dm_channel(sender, to)
+
         payload = {
             "id": str(uuid.uuid4()),
-            "type": "chat",
+            "type": "direct",
             "from": sender,
-            "channel": channel or "general",
+            "to": to,
+            "channel": dm_channel,
             "text": text,
             "ts": int(time.time()),
         }
@@ -183,7 +199,13 @@ class P2PNode:
         try:
             fut.result(timeout=5)
             self._store_message(payload, direction="out")
-            return {"ok": True, "message": "sent"}
+            return {
+                "ok": True,
+                "message": "sent",
+                "id": payload["id"],
+                "channel": dm_channel,
+                "to": to,
+            }
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
@@ -237,6 +259,6 @@ class P2PNode:
         try:
             results = fut.result(timeout=8)
             self._store_message(payload, direction="out")
-            return {"ok": True, "results": results}
+            return {"ok": True, "results": results, "id": payload["id"]}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}

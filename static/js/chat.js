@@ -1,5 +1,7 @@
 const TRACKER_BASE = "http://127.0.0.1:9000";
 
+const ALL_MESSAGES_CHANNEL = "__all__";
+
 const state = {
   username: "",
   channel: "general",
@@ -33,6 +35,12 @@ function showToast(text) {
   toastEl.textContent = text;
   toastEl.classList.remove("hidden");
   setTimeout(() => toastEl.classList.add("hidden"), 1800);
+}
+
+function buildDmChannelKey(a, b) {
+  const left = String(a || "").trim();
+  const right = String(b || "").trim();
+  return `dm:${[left, right].sort().join(":")}`;
 }
 
 async function requireLogin() {
@@ -236,6 +244,12 @@ function renderCurrentView() {
 
 function addMessageToView(viewKey, msg) {
   ensureView(viewKey);
+
+  const alreadyExists = state.views[viewKey].some((item) => item.id === msg.id);
+  if (alreadyExists) {
+    return;
+  }
+
   state.views[viewKey].push(msg);
 
   if (state.currentView === viewKey) {
@@ -301,10 +315,13 @@ function routeIncomingMessage(msg) {
     };
   }
 
-  if (msg.direction === "in") {
-    const fromUser = msg.from || "unknown";
+  if (msg.type === "direct") {
+    const peerUser = msg.direction === "in"
+      ? (msg.from || "unknown")
+      : (msg.to || "unknown");
+
     return {
-      viewKey: getPeerViewKey(fromUser),
+      viewKey: getPeerViewKey(peerUser),
       msg
     };
   }
@@ -319,7 +336,7 @@ async function pollMessages() {
   try {
     const afterSeq = state.lastSeq || 0;
     const data = await localApi("/messages", "POST", {
-      channel: state.channel,
+      channel: ALL_MESSAGES_CHANNEL,
       after_seq: afterSeq
     });
 
@@ -359,10 +376,13 @@ async function sendDirect() {
   if (!message) return;
 
   const peer = state.selectedPeer;
+  const dmChannel = buildDmChannelKey(state.username, peer.username);
 
   const res = await localApi("/send-peer", "POST", {
     sender: state.username,
-    channel: state.channel,
+    to: peer.username,
+    type: "direct",
+    channel: dmChannel,
     message,
     ip: peer.ip,
     port: peer.port
@@ -370,14 +390,16 @@ async function sendDirect() {
 
   if (res.ok) {
     const localMsg = {
-      id: `local-direct-${Date.now()}-${Math.random()}`,
+      id: res.id || `local-direct-${Date.now()}-${Math.random()}`,
       from: state.username,
+      to: peer.username,
       text: message,
-      channel: state.channel,
+      channel: dmChannel,
       direction: "out",
       type: "direct"
     };
 
+    state.seenIds.add(localMsg.id);
     addMessageToView(getPeerViewKey(peer.username), localMsg);
     inputEl.value = "";
     setStatus(`Sent to ${peer.username}`);
