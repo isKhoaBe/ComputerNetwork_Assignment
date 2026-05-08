@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>P2P Chat</title>
+  <link rel="stylesheet" href="/static/css/chat.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <h2>Channels</h2>
+      <div class="list">
+        <button class="channel active" data-channel="general"># general</button>
+      </div>
+
+      <h2>Peers</h2>
+      <div id="peerList" class="list"></div>
+      <button id="refreshPeersBtn">Refresh Peers</button>
+    </aside>
+
+    <main class="main">
+      <div class="topbar">
+        <div>User: <strong id="currentUser"></strong></div>
+        <div style="display:flex; gap:12px; align-items:center;">
+          <span id="statusText">Ready</span>
+          <button id="logoutBtn">Logout</button>
+        </div>
+      </div>
+
+      <div id="messages" class="messages"></div>
+
+      <div class="inputbar">
+        <input id="messageInput" type="text" placeholder="Type message..." />
+        <button id="actionBtn">Broadcast</button>
+      </div>
+    </main>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="/static/js/chat.js"></script>
+</body>
+</html>
