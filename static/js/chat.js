@@ -1,11 +1,11 @@
-const TRACKER_BASE = "http://127.0.0.1:9000";
+const TRACKER_BASE = "http://192.168.73.150:9000";
 
 const ALL_MESSAGES_CHANNEL = "__all__";
 
 const state = {
   username: "",
   channel: "general",
-  peers: [],
+  peers: [],  
   selectedPeer: null,
   lastSeq: 0,
   seenIds: new Set(),

@@ -54,86 +54,58 @@ from .dictionary import CaseInsensitiveDict
 import selectors
 sel = selectors.DefaultSelector()
 
-#mode_async = "callback"
-#mode_async = "coroutine"
-mode_async = "threading"
-
-def handle_client(ip, port, conn, addr, routes):
-    """
-    Initializes an HttpAdapter instance and delegates the client handling logic to it.
-
-    :param ip (str): IP address of the server.
-    :param port (int): Port number the server is listening on.
-    :param conn (socket.socket): Client connection socket.
-    :param addr (tuple): client address (IP, port).
-    :param routes (dict): Dictionary of route handlers.
-    """
-    print("[Backend] Invoke handle_client accepted connection from {}".format(addr))
-    daemon = HttpAdapter(ip, port, conn, addr, routes)
-
-    # Handle client
-    daemon.handle_client(conn, addr, routes)
+mode_async = "coroutine"
 
 
-# Callback for handling new client (itself run in sync mode)
-def handle_client_callback(server, ip, port,conn, addr, routes):
-    """
-    Initialize connection instance and delegates the client handling logic to it.
-
-    :param ip (str): IP address of the server.
-    :param port (int): Port number the server is listening on.
-    :param routes (dict): Dictionary of route handlers.
-    """
-    print("[Backend] Invoke handle_client_callback accepted connection from {}".format(addr))
-
-    daemon = HttpAdapter(ip, port, conn, addr, routes)
-
-    # Handle client
-    daemon.handle_client(conn, addr, routes)
-
-
-# Coroutine async/await for handling new client
 async def handle_client_coroutine(reader, writer, routes):
-    """
-    Coroutine in async communication to initialize connection instance
-    then delegates the client handling logic to it.
-
-    :param reader (StreamReader): Stream reader wrapper.
-    :param writer (StreamWriter): Stream writer wrapper.
-    """
     addr = writer.get_extra_info("peername")
     print("[Backend] Invoke handle_client_coroutine accepted connection from {}".format(addr))
 
-    # Handle client in asynchronous mode
     daemon = HttpAdapter(None, None, None, addr, routes)
+
     try:
         await daemon.handle_client_coroutine(reader, writer)
-    except BlockingIOError:
-        pass
     except Exception as e:
-        print(f"Error handling coroutine: {e}")
+        print(f"[Backend] Error handling coroutine: {e}")
     finally:
         writer.close()
         await writer.wait_closed()
 
-async def async_server(ip="0.0.0.0", port=7000, routes={}):
+
+async def async_server(ip="0.0.0.0", port=7000, routes=None):
+    if routes is None:
+        routes = {}
+
     print("[Backend] async_server **ASYNC** listening on port {}".format(port))
-    if routes != {}:
+
+    if routes:
         print("[Backend] route settings")
         for key, value in routes.items():
-            isCoFunc = ""
-            if inspect.iscoroutinefunction(value):
-               isCoFunc += "**ASYNC** "
-            print("   + ('{}', '{}'): {}{}".format(key[0], key[1], isCoFunc, str(value)))
+            is_co_func = "**ASYNC** " if inspect.iscoroutinefunction(value) else ""
+            print("   + ('{}', '{}'): {}{}".format(
+                key[0], key[1], is_co_func, str(value)
+            ))
 
     async def client_cb(reader, writer):
         await handle_client_coroutine(reader, writer, routes)
 
-    async_server = await asyncio.start_server(client_cb, ip, port)
-    async with async_server:
-        await async_server.serve_forever()
-    return
+    server = await asyncio.start_server(client_cb, ip, port)
 
+    async with server:
+        await server.serve_forever()
+
+
+def run_backend(ip, port, routes=None):
+    global mode_async
+
+    if routes is None:
+        routes = {}
+
+    print("[Backend] run_backend with routes={}".format(routes))
+
+    if mode_async == "coroutine":
+        asyncio.run(async_server(ip, port, routes))
+        return
 
 def run_backend(ip, port, routes):
     """

@@ -1,187 +1,350 @@
-#
-# Copyright (C) 2026 pdnguyen of HCMC University of Technology VNU-HCM.
-# All rights reserved.
-# This file is part of the CO3093/CO3094 course,
-# and is released under the "MIT License Agreement". Please see the LICENSE
-# file that should have been included as part of this package.
-#
-# AsynapRous release
-#
-# The authors hereby grant to Licensee personal permission to use
-# and modify the Licensed Source Code for the sole purpose of studying
-# while attending the course
-#
-
-
-"""
-app.sampleapp
-~~~~~~~~~~~~~~~~~
-
-"""
-
-import sys
-import os
-import importlib.util
 import json
+import os
+import uuid
 
-from   daemon import AsynapRous
+from daemon import AsynapRous
+from apps.p2p_logic import P2PNode, ALL_MESSAGES_CHANNEL
 
 app = AsynapRous()
+
 active_peers = {}
-channel_messages =  {}
+active_channels = ["general", "team1"]
 
-def build_http_response(json_data):
-    body_str = json.dumps(json_data)
-    response = (
-        "HTTP/1.1 200 OK\r\n"
-        "Content-Type: application/json\r\n"
-        f"Content-Length: {len(body_str)}\r\n"
-        "\r\n"
-        f"{body_str}"
-    )
-    return response.encode("utf-8")
+sessions = {}
 
-#tracker logic(client-server)
+USERS = {
+    "alice": "123",
+    "bob": "123",
+    "charlie": "123",
+    "dave": "123",
+}
+
+APP_MODE = os.environ.get("APP_MODE", "peer")
+APP_IP = os.environ.get("APP_IP", "127.0.0.1")
+P2P_PORT = int(os.environ.get("P2P_PORT", "9101"))
+INSTANCE_ID = os.environ.get("INSTANCE_ID", "unknown")
+
+node = None
+if APP_MODE != "tracker":
+    node = P2PNode(listen_host="0.0.0.0", listen_port=P2P_PORT)
+    node.start_background()
+
+
+def build_http_response(json_data, status="200 OK", extra_headers=None):
+    body_bytes = json.dumps(json_data).encode("utf-8")
+
+    headers = [
+        f"HTTP/1.1 {status}",
+        "Content-Type: application/json",
+        "Access-Control-Allow-Origin: *",
+        "Access-Control-Allow-Headers: Content-Type, Cookie",
+        "Access-Control-Allow-Methods: GET, POST, OPTIONS",
+        f"Content-Length: {len(body_bytes)}",
+    ]
+
+    if extra_headers:
+        for k, v in extra_headers.items():
+            headers.append(f"{k}: {v}")
+
+    response = ("\r\n".join(headers) + "\r\n\r\n").encode("utf-8") + body_bytes
+    return response
+
+
+def _json_body(body, default=None):
+    if default is None:
+        default = {}
+
+    if body is None:
+        return default
+
+    if isinstance(body, (bytes, bytearray)):
+        body = body.decode("utf-8", errors="replace")
+
+    if isinstance(body, str):
+        body = body.strip()
+        if not body:
+            return default
+        return json.loads(body)
+
+    if isinstance(body, dict):
+        return body
+
+    return default
+
+
+def _header_get(headers, key, default=""):
+    try:
+        return headers.get(key, default) or default
+    except Exception:
+        return default
+
+
+def _get_cookie(headers, name):
+    cookie_header = _header_get(headers, "Cookie", "")
+    for part in cookie_header.split(";"):
+        part = part.strip()
+        if "=" in part:
+            k, v = part.split("=", 1)
+            if k.strip() == name:
+                return v.strip()
+    return None
+
+
+@app.route('/self-info', methods=['GET'])
+def self_info(headers="guest", body="anonymous"):
+    return build_http_response({
+        "ok": True,
+        "ip": APP_IP,
+        "p2p_port": P2P_PORT,
+        "mode": APP_MODE
+    })
+
+
+@app.route('/instance', methods=['GET'])
+def instance(headers="guest", body="anonymous"):
+    return build_http_response({
+        "ok": True,
+        "instance": INSTANCE_ID,
+        "ip": APP_IP,
+        "p2p_port": P2P_PORT,
+        "mode": APP_MODE
+    })
+
+
 @app.route('/submit-info', methods=['POST'])
 def submit_info(headers="guest", body="anonymous"):
-    print(f"[tracker] recieve sign-up information: {body}")
     try:
-        peer_info = json.loads(body)
+        peer_info = _json_body(body, {})
         username = peer_info.get("username")
-        if username:
-            active_peers[username] = {
-                "ip": peer_info.get("ip"),
-                "port": peer_info.get("port")
-            }
-            data = {"ok": True, "message":f"peer {username} registered"}
-        else:
-            data = {"status":"failed", "message":"no username"}
-    except json.JSONDecodeError:
-        data = {"status":"error", "message":"invalid JSON"}
+        ip = peer_info.get("ip")
+        port = peer_info.get("port")
 
-    # Convert to JSON string and return
-    # return  json.dumps(data).encode("utf-8")
+        if username and ip and port:
+            active_peers[username] = {
+                "ip": ip,
+                "port": port
+            }
+            data = {"ok": True, "message": f"peer {username} registered"}
+        else:
+            data = {"ok": False, "error": "missing username/ip/port"}
+    except Exception:
+        data = {"ok": False, "error": "invalid JSON"}
+
     return build_http_response(data)
+
+
+@app.route('/add-list', methods=['POST'])
+def add_list(headers="guest", body="anonymous"):
+    try:
+        msg_data = _json_body(body, {})
+        new_channel = msg_data.get("channel")
+        if new_channel:
+            if new_channel not in active_channels:
+                active_channels.append(new_channel)
+            data = {"ok": True, "message": f"Channel '{new_channel}' added"}
+        else:
+            data = {"ok": False, "error": "Missing channel name"}
+    except Exception:
+        data = {"ok": False, "error": "invalid request"}
+    return build_http_response(data)
+
 
 @app.route('/get-list', methods=['GET'])
 def get_list(headers="guest", body="anonymous"):
-    peer_list = [{"username": k, "ip": v["ip"], "port": v["port"]} for k,v in active_peers.items()]
+    peer_list = [
+        {"username": k, "ip": v["ip"], "port": v["port"]}
+        for k, v in active_peers.items()
+    ]
     data = {
-        "ok":True,
+        "ok": True,
         "peers": peer_list,
-        "channel": ["general", "team1"]
+        "channels": active_channels
     }
     return build_http_response(data)
 
-#chat logic- peer_to_peer
+
 @app.route("/connect-peer", methods=["POST"])
 def connect_peer(headers="guest", body="anonymous"):
     try:
-        req = json.loads(body)
-        sender = req.get("from")
-        print(f"[P2P] connect accepted from: {sender}")
-        data = {"status": "connected", "message":f"hello {sender}, I'm ready!"}
-    except json.JSONDecodeError:
-        data = {"status": "error", "message": "Invalid JSON format"}
-    # return json.dumps(data).encode("utf-8")
+        req = _json_body(body, {})
+        target = req.get("target_username")
+        if target:
+            data = {"ok": True, "status": "connected", "message": f"hello {target}, I'm ready!"}
+        else:
+            data = {"ok": False, "error": "missing target_username"}
+    except Exception:
+        data = {"ok": False, "error": "invalid JSON format"}
     return build_http_response(data)
+
+
+@app.route('/messages', methods=['POST'])
+def messages(headers="guest", body="{}"):
+    if node is None:
+        return build_http_response({"ok": False, "error": "messages not available on tracker mode"})
+
+    try:
+        data = _json_body(body, {})
+        channel = data.get("channel", ALL_MESSAGES_CHANNEL)
+        after_seq = int(data.get("after_seq", 0))
+        return build_http_response(node.get_messages(channel=channel, after_seq=after_seq))
+    except Exception as exc:
+        return build_http_response({"ok": False, "error": str(exc)})
 
 
 @app.route('/send-peer', methods=['POST'])
 def send_peer(headers="guest", body="anonymous"):
-    print(f">>> DEBUG BODY NHẬN ĐƯỢC: {body}")
+    if node is None:
+        return build_http_response({"ok": False, "error": "send-peer not available on tracker mode"})
+
     try:
-        # Framework đã truyền đúng JSON body vào đây rồi
-        msg_data = json.loads(body)
-
+        msg_data = _json_body(body, {})
         sender = msg_data.get("sender")
-        content = msg_data.get("message")
+        receiver = msg_data.get("to")
+        channel = msg_data.get("channel", "")
+        message = str(msg_data.get("message", "")).strip()
+        ip = msg_data.get("ip")
+        port = int(msg_data.get("port", 0))
 
-        print(f"\n[Direct message from {sender}]: {content}")
-        data = {"status": "received", "message": "SUCESS!"}
-    except Exception as e:
-        data = {"status": "error", "message": f"ERROR: {str(e)}"}
+        if not message:
+            return build_http_response({"ok": False, "error": "empty message"})
+        if not ip or not port:
+            return build_http_response({"ok": False, "error": "missing peer ip/port"})
+        if not receiver:
+            return build_http_response({"ok": False, "error": "missing peer username"})
 
-    # Trả về bytes, Framework sẽ tự động đính kèm HTTP Header (200 OK)
-    # return json.dumps(data).encode("utf-8")
-    return build_http_response(data)
+        result = node.send_direct_sync(
+            sender=sender,
+            to=receiver,
+            ip=ip,
+            port=port,
+            channel=channel,
+            text=message,
+        )
+        return build_http_response(result)
+    except Exception as exc:
+        return build_http_response({"ok": False, "error": str(exc)})
 
 
 @app.route('/broadcast-peer', methods=['POST'])
 def broadcast_peer(headers="guest", body="anonymous"):
+    if node is None:
+        return build_http_response({"ok": False, "error": "broadcast-peer not available on tracker mode"})
+
     try:
-        msg_data = json.loads(body)
-        channel = msg_data.get("channel","general")
-        sender  = msg_data.get("sender")
-        content = msg_data.get("message")
+        msg_data = _json_body(body, {})
+        sender = msg_data.get("sender")
+        channel = msg_data.get("channel", "general")
+        message = str(msg_data.get("message", "")).strip()
+        peers = msg_data.get("peers", [])
 
-        if channel not in channel_messages:
-            channel_messages[channel] = []
-        channel_messages[channel].append({"from": sender, "msg": content})
+        if not message:
+            return build_http_response({"ok": False, "error": "empty message"})
 
-        print(f"\n[{channel}] {sender}: {content}")
-        data = {"status": "broadcast_received"}
-    except Exception:
-        data = {"status": "error"}
-        
-    # return json.dumps(data).encode("utf-8")
-    return build_http_response(data)
+        result = node.broadcast_sync(
+            sender=sender,
+            peers=peers,
+            channel=channel,
+            text=message,
+        )
+        return build_http_response(result)
+    except Exception as exc:
+        return build_http_response({"ok": False, "error": str(exc)})
+
 
 @app.route('/login', methods=['POST'])
 def login(headers="guest", body="anonymous"):
     try:
-        msg_data = json.loads(str(body))
-        username = msg_data.get("username")
-        password = msg_data.get("password")    
+        msg_data = _json_body(body, {})
+        username = str(msg_data.get("username", "")).strip()
+        password = str(msg_data.get("password", "")).strip()
 
-        if username and password:
-            data = {
-                "ok":True,
+        expected_password = USERS.get(username)
+
+        if not username or not password:
+            return build_http_response(
+                {"ok": False, "error": "missing username or password"},
+                status="400 Bad Request"
+            )
+
+        if expected_password is None or expected_password != password:
+            return build_http_response(
+                {"ok": False, "error": "invalid username or password"},
+                status="401 Unauthorized"
+            )
+
+        session_id = str(uuid.uuid4())
+        sessions[session_id] = username
+
+        return build_http_response(
+            {
+                "ok": True,
                 "message": "login success",
                 "username": username
+            },
+            extra_headers={
+                "Set-Cookie": f"session_id={session_id}; Path=/; HttpOnly"
             }
-        else:
-            data = {
-                "ok":False,
-                "error":"invalid username or password"
-            }
-    except Exception:
-        data={"ok":False, "error": "invalid request"}
-    return build_http_response(data)
-    
+        )
 
-#app launcher
+    except Exception as exc:
+        print(f"[login] parse error: {exc}")
+        return build_http_response(
+            {"ok": False, "error": "invalid request"},
+            status="400 Bad Request"
+        )
+
+
+@app.route('/me', methods=['GET'])
+def me(headers="guest", body="anonymous"):
+    session_id = _get_cookie(headers, "session_id")
+    username = sessions.get(session_id)
+
+    if not username:
+        return build_http_response(
+            {"ok": False, "error": "unauthorized"},
+            status="401 Unauthorized"
+        )
+
+    return build_http_response({
+        "ok": True,
+        "username": username
+    })
+
+
+@app.route('/logout', methods=['POST'])
+def logout(headers="guest", body="anonymous"):
+    session_id = _get_cookie(headers, "session_id")
+    if session_id in sessions:
+        del sessions[session_id]
+
+    return build_http_response(
+        {"ok": True, "message": "logout success"},
+        extra_headers={
+            "Set-Cookie": "session_id=deleted; Path=/; Max-Age=0"
+        }
+    )
+
+
+@app.route('/greeting', methods=['PUT'])
+def greeting(headers="guest", body="anonymous"):
+    return build_http_response({"ok": True, "message": "Framework ho tro PUT thanh cong!"})
+
+
+@app.route('/remove-peer', methods=['DELETE'])
+def delete_peer(headers="guest", body="anonymous"):
+    return build_http_response({"ok": True, "message": "Framework ho tro DELETE thanh cong!"})
+
+
 def create_sampleapp(ip, port, mode="peer"):
-    print("="*40)
+    print("=" * 40)
     if mode == 'tracker':
-        print(f"[*] STARTING TRACKER SERVER")
+        print("[*] STARTING TRACKER SERVER")
         print(f"[*] Managing P2P directory at: {ip}:{port}")
     else:
-        print(f"[*] STARTING PEER NODE")
-        print(f"[*] Listening for messages at: {ip}:{port}")
-    print("="*40)
-    # Prepare and launch the RESTful application
+        print("[*] STARTING PEER NODE")
+        print(f"[*] Listening for HTTP at: {ip}:{port}")
+        print(f"[*] Listening for P2P at: {APP_IP}:{P2P_PORT}")
+    print("=" * 40)
+
     app.prepare_address(ip, port)
     app.run()
-
-
-    """
-    Handle user login via POST request.
-
-    This route simulates a login process and prints the provided headers and body
-    to the console.
-
-    :param headers (str): The request headers or user identifier.
-    :param body (str): The request body or login payload.
-    """
-
-
-    """
-    Handle greeting via PUT request.
-
-    This route prints a greeting message to the console using the provided headers
-    and body.
-
-    :param headers (str): The request headers or user identifier.
-    :param body (str): The request body or message payload.
-    """
