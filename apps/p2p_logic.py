@@ -136,18 +136,27 @@ class P2PNode:
             self._messages[channel].append(msg)
             return msg
 
-    def get_messages(self, channel: str = ALL_MESSAGES_CHANNEL, after_seq: int = 0) -> Dict[str, Any]:
+    def get_messages(self, session_id: str = None, channel: str = ALL_MESSAGES_CHANNEL, after_seq: int = 0) -> Dict[str, Any]:
         with self._lock:
+            if not hasattr(self, '_session_starts'):
+                self._session_starts = {}
+                
+            if session_id and session_id not in self._session_starts:
+                self._session_starts[session_id] = self._seq
+                
+            min_seq = self._session_starts.get(session_id, 0)
+            effective_after_seq = max(int(after_seq), min_seq)
+
             if channel == ALL_MESSAGES_CHANNEL:
                 all_msgs: List[Dict[str, Any]] = []
                 for bucket in self._messages.values():
                     all_msgs.extend(bucket)
                 all_msgs.sort(key=lambda item: item["seq"])
-                new_msgs = [m for m in all_msgs if m["seq"] > int(after_seq)]
+                new_msgs = [m for m in all_msgs if m["seq"] > effective_after_seq]
                 last_seq = all_msgs[-1]["seq"] if all_msgs else 0
             else:
                 all_msgs = list(self._messages.get(channel, []))
-                new_msgs = [m for m in all_msgs if m["seq"] > int(after_seq)]
+                new_msgs = [m for m in all_msgs if m["seq"] > effective_after_seq]
                 last_seq = all_msgs[-1]["seq"] if all_msgs else 0
 
         return {

@@ -8,7 +8,7 @@ from apps.p2p_logic import P2PNode, ALL_MESSAGES_CHANNEL
 app = AsynapRous()
 
 active_peers = {}
-active_channels = ["general"]
+active_channels = ["general", "team1"]
 
 sessions = {}
 
@@ -183,10 +183,14 @@ def messages(headers="guest", body="{}"):
         return build_http_response({"ok": False, "error": "messages not available on tracker mode"})
 
     try:
+        session_id = _get_cookie(headers, "session_id")
+        if not session_id or session_id not in sessions:
+            return build_http_response({"ok": False, "error": "unauthorized"})
+            
         data = _json_body(body, {})
         channel = data.get("channel", ALL_MESSAGES_CHANNEL)
         after_seq = int(data.get("after_seq", 0))
-        return build_http_response(node.get_messages(channel=channel, after_seq=after_seq))
+        return build_http_response(node.get_messages(session_id=session_id, channel=channel, after_seq=after_seq))
     except Exception as exc:
         return build_http_response({"ok": False, "error": str(exc)})
 
