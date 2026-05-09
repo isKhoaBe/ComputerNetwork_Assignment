@@ -1,489 +1,484 @@
 # ComputerNetwork_Assignment
 
-Assignment 1 - Implement non-blocking HTTP server, authentication, proxy, and hybrid chat application.
+Assignment 1 – Implement a non-blocking HTTP server, authentication, proxy, and hybrid chat application.
 
-## Chức năng chính
-- HTTP server non-blocking
-- Authentication bằng username/password
-- Session bằng cookie
-- Tracker quản lý danh sách peer
-- Peer-to-peer direct message
-- Broadcast message
-- Web UI cho chat
-- Proxy + round-robin
+## Main Features
+- Non-blocking HTTP server
+- Username/password authentication
+- Cookie-based session management
+- Tracker for peer registration and discovery
+- Peer-to-peer direct messaging
+- Broadcast messaging
+- Web UI for chat
+- Proxy with host-based routing
+- Optional round-robin routing
+- Dynamic proxy peer resolution through tracker
 
-## Tài khoản demo
-- alice / 123
-- bob / 123
-- charlie / 123
-- dave / 123
+## Demo Accounts
+- `alice / 123`
+- `bob / 123`
 
-## Cấu trúc chạy local
-- Tracker: 9000
-- Alice: HTTP 9001, P2P 9101
-- Bob: HTTP 9002, P2P 9102
-- Charlie: HTTP 9003, P2P 9103
-- Dave: HTTP 9004, P2P 9104
-- Proxy: 8080
+## Demo Topology
+### Fixed machine
+- **Tracker**: `192.168.208.150:9000`
+- **Proxy** (optional): `192.168.208.150:8080`
 
-## Lưu ý IP
-- Nếu test trên 1 máy: dùng 127.0.0.1
-- Nếu test trên nhiều máy LAN:
-  - đổi APP_IP theo IP thật của từng máy
-  - đổi TRACKER_BASE trong static/js/chat.js thành IP của máy tracker
-  - khi gọi /submit-info, phải khai báo đúng ip + port thật
+### Dynamic peer machines
+- **Alice machine**: dynamic IP from current Wi-Fi/LAN, HTTP `9001`, P2P `9101`
+- **Bob machine**: dynamic IP from current Wi-Fi/LAN, HTTP `9002`, P2P `9102`
 
----
+## Before Running
 
-## 1. Xóa process cũ
-Chạy PowerShell:
+### 1) Backend mode
+This project uses:
+- **coroutine mode** for the backend/web application layer
+- **threading mode** for the proxy layer
 
-```powershell
-9000,9001,9002,9003,9004,8080,9100,9101,9102,9103,9104 | ForEach-Object {
-  Get-NetTCPConnection -LocalPort $_ -ErrorAction SilentlyContinue |
-    Select-Object -ExpandProperty OwningProcess -Unique |
-    ForEach-Object { Stop-Process -Id $_ -Force }
+### 2) `static/js/chat.js`
+Make sure `TRACKER_BASE` points to the tracker machine:
+
+```javascript
+const TRACKER_BASE = "http://192.168.208.150:9000";
+```
+
+### 3) About proxy mode
+This README assumes you are using the **dynamic tracker-based proxy** version of `proxy.py`.
+
+That means:
+- the tracker route is still static
+- peer backends such as Alice/Bob are resolved dynamically from tracker `/get-list`
+- if Alice/Bob changes Wi-Fi/LAN IP, you do **not** need to rewrite peer IPs in `proxy.conf`
+- however, the peer must **restart and register again** with the tracker after its IP changes
+
+### 4) About `proxy.conf`
+With the dynamic proxy version, you only need static config for:
+- tracker
+- optional round-robin hosts
+
+Example minimal config:
+
+```conf
+host "192.168.208.150:8080" {
+    proxy_pass http://192.168.208.150:9000;
+}
+
+host "rr.local" {
+    proxy_pass http://192.168.73.196:9001;
+    proxy_pass http://192.168.73.24:9002;
+    dist_policy round-robin;
 }
 ```
 
-Kiểm tra lại:
+Peer hosts such as:
+- `alice.192.168.208.150.nip.io:8080`
+- `bob.192.168.208.150.nip.io:8080`
 
-```powershell
-Get-NetTCPConnection -LocalPort 9000,9001,9002,9003,9004,8080,9100,9101,9102,9103,9104 -ErrorAction SilentlyContinue
-```
+will be resolved dynamically by proxy through tracker lookup.
+
+### 5) Current proxy assumption
+The dynamic proxy currently infers HTTP port from registered P2P port using:
+
+- `9101 -> 9001`
+- `9102 -> 9002`
+
+So if you change the port convention, update proxy logic or store `http_port` in tracker.
 
 ---
 
-## 2. Start hệ thống
+# COMMAND ORDER – RUN IN THIS EXACT ORDER
 
-### Tracker
+## STEP 1 — Start tracker on tracker machine
+Run this **only on the tracker machine**:
+
 ```powershell
 $env:APP_MODE="tracker"
-$env:APP_IP="127.0.0.1"
+$env:APP_IP="192.168.208.150"
 $env:P2P_PORT="9100"
 $env:INSTANCE_ID="tracker"
-py start_sampleapp.py --server-ip 127.0.0.1 --server-port 9000 --mode tracker
+py start_sampleapp.py --server-ip 192.168.208.150 --server-port 9000 --mode tracker
 ```
 
-### Alice
-```powershell
-$env:APP_MODE="peer"
-$env:APP_IP="127.0.0.1"
-$env:P2P_PORT="9101"
-$env:INSTANCE_ID="alice"
-py start_sampleapp.py --server-ip 127.0.0.1 --server-port 9001 --p2p-port 9101 --mode peer
-```
-
-### Bob
-```powershell
-$env:APP_MODE="peer"
-$env:APP_IP="127.0.0.1"
-$env:P2P_PORT="9102"
-$env:INSTANCE_ID="bob"
-py start_sampleapp.py --server-ip 127.0.0.1 --server-port 9002 --p2p-port 9102 --mode peer
-```
-
-### Charlie
-```powershell
-$env:APP_MODE="peer"
-$env:APP_IP="127.0.0.1"
-$env:P2P_PORT="9103"
-$env:INSTANCE_ID="charlie"
-py start_sampleapp.py --server-ip 127.0.0.1 --server-port 9003 --p2p-port 9103 --mode peer
-```
-
-### Dave
-```powershell
-$env:APP_MODE="peer"
-$env:APP_IP="127.0.0.1"
-$env:P2P_PORT="9104"
-$env:INSTANCE_ID="dave"
-py start_sampleapp.py --server-ip 127.0.0.1 --server-port 9004 --p2p-port 9104 --mode peer
-```
-
-Kiểm tra port đã lên:
-
-```powershell
-Get-NetTCPConnection -LocalPort 9000,9001,9002,9003,9004 -State Listen
-```
+Keep this terminal open.
 
 ---
 
-## 3. Register peers lên tracker
+## STEP 2 — Check tracker is alive
+Run on tracker machine or any machine that can reach tracker:
 
-### Alice
 ```powershell
+Invoke-RestMethod -Uri "http://192.168.208.150:9000/get-list" -Method GET | ConvertTo-Json -Depth 6
+```
+
+If this works, the tracker is ready.
+
+---
+
+## STEP 3 — Start Alice on Alice machine
+Run this **only on Alice machine**.
+
+### 3.1 Get Alice current IP
+```powershell
+$trackerIp = "192.168.208.150"
+
+$udp = New-Object System.Net.Sockets.Socket(
+  [System.Net.Sockets.AddressFamily]::InterNetwork,
+  [System.Net.Sockets.SocketType]::Dgram,
+  [System.Net.Sockets.ProtocolType]::Udp
+)
+
+$udp.Connect($trackerIp, 9000)
+$myIP = ($udp.LocalEndPoint).Address.IPAddressToString
+$udp.Close()
+
+$myIP
+```
+
+> If this prints `192.168.208.150`, you are on the tracker machine, not Alice machine.
+
+### 3.2 Start Alice peer
+```powershell
+$trackerIp = "192.168.208.150"
+
+$udp = New-Object System.Net.Sockets.Socket(
+  [System.Net.Sockets.AddressFamily]::InterNetwork,
+  [System.Net.Sockets.SocketType]::Dgram,
+  [System.Net.Sockets.ProtocolType]::Udp
+)
+$udp.Connect($trackerIp, 9000)
+$myIP = ($udp.LocalEndPoint).Address.IPAddressToString
+$udp.Close()
+
+$env:APP_MODE="peer"
+$env:APP_IP=$myIP
+$env:P2P_PORT="9101"
+$env:INSTANCE_ID="alice"
+
+py start_sampleapp.py --server-ip $myIP --server-port 9001 --p2p-port 9101 --mode peer
+```
+
+Keep this terminal open.
+
+### 3.3 Register Alice to tracker
+Open a second terminal on Alice machine and run:
+
+```powershell
+$trackerIp = "192.168.208.150"
+
+$udp = New-Object System.Net.Sockets.Socket(
+  [System.Net.Sockets.AddressFamily]::InterNetwork,
+  [System.Net.Sockets.SocketType]::Dgram,
+  [System.Net.Sockets.ProtocolType]::Udp
+)
+$udp.Connect($trackerIp, 9000)
+$myIP = ($udp.LocalEndPoint).Address.IPAddressToString
+$udp.Close()
+
 $body = @{
   username = "alice"
-  ip = "127.0.0.1"
+  ip = $myIP
   port = 9101
 } | ConvertTo-Json
 
-Invoke-RestMethod -Uri "http://127.0.0.1:9000/submit-info" -Method POST -ContentType "application/json" -Body $body
+Invoke-RestMethod -Uri "http://${trackerIp}:9000/submit-info" `
+  -Method POST `
+  -ContentType "application/json" `
+  -Body $body
 ```
 
-### Bob
+---
+
+## STEP 4 — Start Bob on Bob machine
+Run this **only on Bob machine**.
+
+### 4.1 Get Bob current IP
 ```powershell
+$trackerIp = "192.168.208.150"
+
+$udp = New-Object System.Net.Sockets.Socket(
+  [System.Net.Sockets.AddressFamily]::InterNetwork,
+  [System.Net.Sockets.SocketType]::Dgram,
+  [System.Net.Sockets.ProtocolType]::Udp
+)
+
+$udp.Connect($trackerIp, 9000)
+$myIP = ($udp.LocalEndPoint).Address.IPAddressToString
+$udp.Close()
+
+$myIP
+```
+
+> If this prints `192.168.208.150`, you are on the tracker machine, not Bob machine.
+
+### 4.2 Start Bob peer
+```powershell
+$trackerIp = "192.168.208.150"
+
+$udp = New-Object System.Net.Sockets.Socket(
+  [System.Net.Sockets.AddressFamily]::InterNetwork,
+  [System.Net.Sockets.SocketType]::Dgram,
+  [System.Net.Sockets.ProtocolType]::Udp
+)
+$udp.Connect($trackerIp, 9000)
+$myIP = ($udp.LocalEndPoint).Address.IPAddressToString
+$udp.Close()
+
+$env:APP_MODE="peer"
+$env:APP_IP=$myIP
+$env:P2P_PORT="9102"
+$env:INSTANCE_ID="bob"
+
+py start_sampleapp.py --server-ip $myIP --server-port 9002 --p2p-port 9102 --mode peer
+```
+
+Keep this terminal open.
+
+### 4.3 Register Bob to tracker
+Open a second terminal on Bob machine and run:
+
+```powershell
+$trackerIp = "192.168.208.150"
+
+$udp = New-Object System.Net.Sockets.Socket(
+  [System.Net.Sockets.AddressFamily]::InterNetwork,
+  [System.Net.Sockets.SocketType]::Dgram,
+  [System.Net.Sockets.ProtocolType]::Udp
+)
+$udp.Connect($trackerIp, 9000)
+$myIP = ($udp.LocalEndPoint).Address.IPAddressToString
+$udp.Close()
+
 $body = @{
   username = "bob"
-  ip = "127.0.0.1"
+  ip = $myIP
   port = 9102
 } | ConvertTo-Json
 
-Invoke-RestMethod -Uri "http://127.0.0.1:9000/submit-info" -Method POST -ContentType "application/json" -Body $body
-```
-
-### Charlie
-```powershell
-$body = @{
-  username = "charlie"
-  ip = "127.0.0.1"
-  port = 9103
-} | ConvertTo-Json
-
-Invoke-RestMethod -Uri "http://127.0.0.1:9000/submit-info" -Method POST -ContentType "application/json" -Body $body
-```
-
-### Dave
-```powershell
-$body = @{
-  username = "dave"
-  ip = "127.0.0.1"
-  port = 9104
-} | ConvertTo-Json
-
-Invoke-RestMethod -Uri "http://127.0.0.1:9000/submit-info" -Method POST -ContentType "application/json" -Body $body
-```
-
-### Kiểm tra tracker
-```powershell
-Invoke-RestMethod -Uri "http://127.0.0.1:9000/get-list" -Method GET | ConvertTo-Json -Depth 6
-```
-
----
-
-## 4. Test Login / Logout
-
-### Mở login page
-- http://127.0.0.1:9001/login.html
-- http://127.0.0.1:9002/login.html
-- http://127.0.0.1:9003/login.html
-- http://127.0.0.1:9004/login.html
-
-### Test login đúng
-Ví dụ:
-- username: alice
-- password: 123
-
-Kết quả:
-- vào được index.html
-- góc trên hiển thị đúng tên user
-
-### Test login sai
-Ví dụ:
-- username: alice
-- password: 999
-
-Kết quả:
-- không vào được
-- hiện lỗi đăng nhập
-
-### Test logout
-- login thành công
-- bấm nút Logout
-- hệ thống quay về login.html
-- mở lại index.html khi chưa login sẽ bị chuyển về login.html
-
-### Test login bằng PowerShell
-```powershell
-$body = @{
-  username = "alice"
-  password = "123"
-} | ConvertTo-Json
-
-$r = Invoke-WebRequest -Uri "http://127.0.0.1:9001/login" `
+Invoke-RestMethod -Uri "http://${trackerIp}:9000/submit-info" `
   -Method POST `
   -ContentType "application/json" `
-  -Body $body `
-  -SessionVariable s1
-
-$r.Content
-$r.Headers["Set-Cookie"]
-```
-
-### Kiểm tra /me
-```powershell
-Invoke-RestMethod -Uri "http://127.0.0.1:9001/me" `
-  -Method GET `
-  -WebSession $s1 | ConvertTo-Json -Depth 6
-```
-
-### Logout bằng PowerShell
-```powershell
-Invoke-RestMethod -Uri "http://127.0.0.1:9001/logout" `
-  -Method POST `
-  -WebSession $s1 | ConvertTo-Json -Depth 6
-```
-
-### Kiểm tra /me sau logout
-```powershell
-try {
-  Invoke-WebRequest -Uri "http://127.0.0.1:9001/me" -Method GET -WebSession $s1
-} catch {
-  $resp = $_.Exception.Response
-  [int]$resp.StatusCode
-}
+  -Body $body
 ```
 
 ---
 
-## 5. Test API chat
+## STEP 5 — Verify tracker list again
+Run on tracker machine:
 
-### Direct message: Alice -> Bob
 ```powershell
+Invoke-RestMethod -Uri "http://192.168.208.150:9000/get-list" -Method GET | ConvertTo-Json -Depth 6
+```
+
+Expected:
+- `alice` appears with Alice’s current IP
+- `bob` appears with Bob’s current IP
+
+---
+
+## STEP 6 — Open UI directly first
+Do this before testing proxy.
+
+### On Alice machine
+Open:
+```text
+http://<Alice_Current_IP>:9001/login.html
+```
+
+### On Bob machine
+Open:
+```text
+http://<Bob_Current_IP>:9002/login.html
+```
+
+Login:
+- Alice uses `alice / 123`
+- Bob uses `bob / 123`
+
+Then go to:
+- `http://<Alice_Current_IP>:9001/index.html`
+- `http://<Bob_Current_IP>:9002/index.html`
+
+Check:
+- click `Refresh Peers`
+- Alice sees Bob
+- Bob sees Alice
+
+---
+
+## STEP 7 — Test API direct message
+### On Alice machine
+Replace `<Bob_Current_IP>` and `<Alice_Current_IP>` first.
+
+```powershell
+$bobIp = "<Bob_Current_IP>"
+
 $body = @{
   sender = "alice"
-  channel = "general"
-  ip = "127.0.0.1"
+  to = "bob"
+  channel = "dm:alice:bob"
+  ip = $bobIp
   port = 9102
   message = "hello bob api"
 } | ConvertTo-Json
 
-Invoke-RestMethod -Uri "http://127.0.0.1:9001/send-peer" -Method POST -ContentType "application/json" -Body $body
+Invoke-RestMethod -Uri "http://<Alice_Current_IP>:9001/send-peer" `
+  -Method POST `
+  -ContentType "application/json" `
+  -Body $body
 ```
 
-### Bob đọc messages
+### On Bob machine
 ```powershell
 $check = @{
-  channel = "general"
+  channel = "__all__"
   after_seq = 0
 } | ConvertTo-Json
 
-Invoke-RestMethod -Uri "http://127.0.0.1:9002/messages" -Method POST -ContentType "application/json" -Body $check | ConvertTo-Json -Depth 6
+Invoke-RestMethod -Uri "http://<Bob_Current_IP>:9002/messages" `
+  -Method POST `
+  -ContentType "application/json" `
+  -Body $check | ConvertTo-Json -Depth 6
 ```
 
-### Broadcast: Alice -> tất cả
+---
+
+## STEP 8 — Test API broadcast
+### On Alice machine
 ```powershell
+$bobIp = "<Bob_Current_IP>"
+
 $body = @{
   sender = "alice"
   channel = "general"
-  message = "hello everyone api"
+  message = "hello bob broadcast"
   peers = @(
-    @{ username = "bob"; ip = "127.0.0.1"; port = 9102 },
-    @{ username = "charlie"; ip = "127.0.0.1"; port = 9103 },
-    @{ username = "dave"; ip = "127.0.0.1"; port = 9104 }
+    @{ username = "bob"; ip = $bobIp; port = 9102 }
   )
 } | ConvertTo-Json -Depth 5
 
-Invoke-RestMethod -Uri "http://127.0.0.1:9001/broadcast-peer" -Method POST -ContentType "application/json" -Body $body
-```
-
-### Bob / Charlie / Dave đọc messages
-```powershell
-$check = @{
-  channel = "general"
-  after_seq = 0
-} | ConvertTo-Json
-
-Invoke-RestMethod -Uri "http://127.0.0.1:9002/messages" -Method POST -ContentType "application/json" -Body $check | ConvertTo-Json -Depth 6
-Invoke-RestMethod -Uri "http://127.0.0.1:9003/messages" -Method POST -ContentType "application/json" -Body $check | ConvertTo-Json -Depth 6
-Invoke-RestMethod -Uri "http://127.0.0.1:9004/messages" -Method POST -ContentType "application/json" -Body $check | ConvertTo-Json -Depth 6
+Invoke-RestMethod -Uri "http://<Alice_Current_IP>:9001/broadcast-peer" `
+  -Method POST `
+  -ContentType "application/json" `
+  -Body $body
 ```
 
 ---
 
-## 6. Test UI chat
+## STEP 9 — Start proxy
+Run on tracker machine:
 
-### Mở các tab
-- http://127.0.0.1:9001/index.html
-- http://127.0.0.1:9002/index.html
-- http://127.0.0.1:9003/index.html
-- http://127.0.0.1:9004/index.html
-
-### Nếu cần set username trong browser console
-Nếu browser chặn paste, gõ trước:
-```javascript
-allow pasting
+```powershell
+py start_proxy.py --server-ip 192.168.208.150 --server-port 8080
 ```
 
-#### Alice
-```javascript
-localStorage.setItem("chat_username", "alice");
-location.reload();
-```
-
-#### Bob
-```javascript
-localStorage.setItem("chat_username", "bob");
-location.reload();
-```
-
-#### Charlie
-```javascript
-localStorage.setItem("chat_username", "charlie");
-location.reload();
-```
-
-#### Dave
-```javascript
-localStorage.setItem("chat_username", "dave");
-location.reload();
-```
-
-### Checklist UI
-- bấm Refresh Peers
-- Alice thấy Bob / Charlie / Dave
-- Bob thấy Alice / Charlie / Dave
-- click peer để vào direct mode
-- bỏ chọn peer để quay lại broadcast/general
-- direct message giữa 2 peer hoạt động
-- broadcast từ 1 peer thì các peer còn lại đều nhận
-- chuyển peer / channel thì cửa sổ chat đổi đúng
+Keep this terminal open.
 
 ---
 
-## 7. Test proxy
+## STEP 10 — Test proxy basic routing
 
-### Start proxy
+### Tracker via proxy
 ```powershell
-py start_proxy.py --server-ip 127.0.0.1 --server-port 8080
+Invoke-RestMethod -Uri "http://192.168.208.150:8080/get-list" `
+  -Method GET `
+  -Headers @{ Host = "192.168.208.150:8080" } | ConvertTo-Json -Depth 6
 ```
 
-### Lưu ý cho máy khác IP
-Trong config/proxy.conf, phải sửa proxy_pass theo IP thật của tracker / peer.
-Nếu tracker ở máy khác, không được để 127.0.0.1.
-
-### Test tracker qua proxy
+### Alice via proxy
 ```powershell
-Invoke-RestMethod -Uri "http://127.0.0.1:8080/get-list" `
+Invoke-RestMethod -Uri "http://192.168.208.150:8080/self-info" `
   -Method GET `
-  -Headers @{ Host = "127.0.0.1:8080" } | ConvertTo-Json -Depth 6
+  -Headers @{ Host = "alice.192.168.208.150.nip.io:8080" } | ConvertTo-Json -Depth 6
 ```
 
-### Test app qua proxy
+### Bob via proxy
 ```powershell
-Invoke-RestMethod -Uri "http://127.0.0.1:8080/self-info" `
+Invoke-RestMethod -Uri "http://192.168.208.150:8080/self-info" `
   -Method GET `
-  -Headers @{ Host = "app1.local" } | ConvertTo-Json -Depth 6
-```
-
-```powershell
-Invoke-RestMethod -Uri "http://127.0.0.1:8080/self-info" `
-  -Method GET `
-  -Headers @{ Host = "app2.local" } | ConvertTo-Json -Depth 6
+  -Headers @{ Host = "bob.192.168.208.150.nip.io:8080" } | ConvertTo-Json -Depth 6
 ```
 
 ---
 
-## 8. Test cookie / session qua proxy
+## STEP 11 — Test login via proxy
 
-### Login qua proxy
+### Alice login via proxy
 ```powershell
 $body = @{
   username = "alice"
   password = "123"
 } | ConvertTo-Json
 
-$r = Invoke-WebRequest -Uri "http://127.0.0.1:8080/login" `
+$r = Invoke-WebRequest -Uri "http://192.168.208.150:8080/login" `
   -Method POST `
-  -Headers @{ Host = "127.0.0.1:8080" } `
+  -Headers @{ Host = "alice.192.168.208.150.nip.io:8080" } `
   -ContentType "application/json" `
   -Body $body `
-  -SessionVariable sProxy
+  -SessionVariable sProxyAlice
 
 $r.Content
 $r.Headers["Set-Cookie"]
 ```
 
-### /me qua proxy
+### Check `/me`
 ```powershell
-Invoke-RestMethod -Uri "http://127.0.0.1:8080/me" `
+Invoke-RestMethod -Uri "http://192.168.208.150:8080/me" `
   -Method GET `
-  -Headers @{ Host = "127.0.0.1:8080" } `
-  -WebSession $sProxy | ConvertTo-Json -Depth 6
+  -Headers @{ Host = "alice.192.168.208.150.nip.io:8080" } `
+  -WebSession $sProxyAlice | ConvertTo-Json -Depth 6
 ```
 
-### Logout qua proxy
+### Logout
 ```powershell
-Invoke-RestMethod -Uri "http://127.0.0.1:8080/logout" `
+Invoke-RestMethod -Uri "http://192.168.208.150:8080/logout" `
   -Method POST `
-  -Headers @{ Host = "127.0.0.1:8080" } `
-  -WebSession $sProxy | ConvertTo-Json -Depth 6
+  -Headers @{ Host = "alice.192.168.208.150.nip.io:8080" } `
+  -WebSession $sProxyAlice | ConvertTo-Json -Depth 6
 ```
 
 ---
 
-## 9. Test round-robin
-
-Phần này nên test riêng, không chạy chung với map 4 peer UI nếu trùng cổng 9002/9003.
-
-Proxy config cần có rr.local trỏ tới 2 backend khác nhau.
+## STEP 12 — Test round-robin (optional)
+Run on tracker machine:
 
 ```powershell
 1..8 | ForEach-Object {
-  Invoke-RestMethod -Uri "http://127.0.0.1:8080/instance" `
+  Invoke-RestMethod -Uri "http://192.168.208.150:8080/instance" `
     -Method GET `
     -Headers @{ Host = "rr.local" } | ConvertTo-Json -Compress
 }
 ```
 
-Kỳ vọng:
-- request được phân phối luân phiên giữa 2 instance
+Expected:
+- requests alternate between the two configured instances
 
 ---
 
-## 10. Checklist PASS cuối cùng
-- tracker start thành công
-- peers register đúng lên tracker
-- self-info đúng port / mode
-- direct API pass
-- broadcast API pass
-- UI refresh peers pass
-- UI direct pass
-- UI broadcast pass
-- chuyển peer / channel đúng
-- login / me / logout pass
-- proxy routing pass
-- round-robin pass nếu nhóm có demo phần đó
+## Fast Checklist
+- [ ] Tracker started
+- [ ] Alice started
+- [ ] Alice registered
+- [ ] Bob started
+- [ ] Bob registered
+- [ ] `/get-list` shows Alice and Bob
+- [ ] Alice login works
+- [ ] Bob login works
+- [ ] Direct API works
+- [ ] Broadcast API works
+- [ ] UI direct chat works
+- [ ] UI broadcast works
+- [ ] Proxy starts
+- [ ] Proxy routes tracker correctly
+- [ ] Proxy resolves Alice correctly
+- [ ] Proxy resolves Bob correctly
+- [ ] Proxy login/session works
+- [ ] Round-robin works if included
 
 ---
 
-## 11. Lỗi thường gặp
-
-### WinError 10049
-- bind sai IP
-- dùng 127.0.0.1 để test local
-- hoặc đổi sang IP LAN đúng
-
-### Port already in use
-- cổng HTTP hoặc P2P đang bị process cũ chiếm
-- chạy lại phần Xóa process cũ
-
-### Peers không hiện trên UI
-- kiểm tra TRACKER_BASE
-- kiểm tra /submit-info
-- bấm Refresh Peers
-
-### Tên user trên UI không khớp backend
-- kiểm tra localStorage ở đúng tab / đúng port
-
-### Broadcast bị double text ở sender
-- để server echo render 1 lần duy nhất
-- không local-add broadcast thêm lần nữa
-
-### CORS lỗi khi gọi tracker khác origin
-- không dùng credentials: include cho tracker fetch nếu không cần cookie tracker
-
----
-
-## 12. Ghi chú khi demo
-- nên dùng tab ẩn danh (Incognito / Private Window) để tránh cookie cũ
-- nếu thấy hành vi lạ:
-  - xóa cache
-  - đóng tab cũ
-  - login lại
-- khi test nhiều máy, luôn kiểm tra lại:
-  - APP_IP
-  - P2P_PORT
-  - TRACKER_BASE
-  - proxy.conf
+## Common mistakes
+- Running the “get dynamic IP” script on the tracker machine instead of Alice/Bob machine
+- Forgetting to replace `TRACKER_BASE`
+- Forgetting to register peer after start
+- Using the wrong tracker IP
+- Testing proxy with old `proxy.py` instead of dynamic tracker-based proxy
+- Using stale browser cache after changing `chat.js`
