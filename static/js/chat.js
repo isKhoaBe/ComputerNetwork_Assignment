@@ -1,4 +1,4 @@
-const TRACKER_BASE = "http://10.127.23.95:9000";
+const TRACKER_BASE = "http://192.168.208.150:9000";
 
 const ALL_MESSAGES_CHANNEL = "__all__";
 
