@@ -8,7 +8,7 @@ from apps.p2p_logic import P2PNode, ALL_MESSAGES_CHANNEL
 app = AsynapRous()
 
 active_peers = {}
-active_channels = ["general", "team1"]
+active_channels = ["general"]
 
 sessions = {}
 
