@@ -173,7 +173,7 @@ def _extract_dynamic_username(hostname: str) -> Optional[str]:
     host_no_port = hostname.split(":", 1)[0].strip().lower()
 
     # Supported examples:
-    # alice.192.168.208.150.nip.io
+    # alice.192.168.1.5.nip.io
     # bob.local
     # charlie.peer
     m = re.match(r"^([a-zA-Z0-9_-]+)\.", host_no_port)

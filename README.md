@@ -20,8 +20,8 @@ Assignment 1 – Implement a non-blocking HTTP server, authentication, proxy, an
 
 ## Demo Topology
 ### Fixed machine
-- **Tracker**: `192.168.208.150:9000`
-- **Proxy** (optional): `192.168.208.150:8080`
+- **Tracker**: `192.168.1.5:9000`
+- **Proxy** (optional): `192.168.1.5:8080`
 
 ### Dynamic peer machines
 - **Alice machine**: dynamic IP from current Wi-Fi/LAN, HTTP `9001`, P2P `9101`
@@ -38,7 +38,7 @@ This project uses:
 Make sure `TRACKER_BASE` points to the tracker machine:
 
 ```javascript
-const TRACKER_BASE = "http://192.168.208.150:9000";
+const TRACKER_BASE = "http://192.168.1.5:9000";
 ```
 
 ### 3) About proxy mode
@@ -58,8 +58,8 @@ With the dynamic proxy version, you only need static config for:
 Example minimal config:
 
 ```conf
-host "192.168.208.150:8080" {
-    proxy_pass http://192.168.208.150:9000;
+host "192.168.1.5:8080" {
+    proxy_pass http://192.168.1.5:9000;
 }
 
 host "rr.local" {
@@ -70,8 +70,8 @@ host "rr.local" {
 ```
 
 Peer hosts such as:
-- `alice.192.168.208.150.nip.io:8080`
-- `bob.192.168.208.150.nip.io:8080`
+- `alice.192.168.1.5.nip.io:8080`
+- `bob.192.168.1.5.nip.io:8080`
 
 will be resolved dynamically by proxy through tracker lookup.
 
@@ -86,16 +86,22 @@ So if you change the port convention, update proxy logic or store `http_port` in
 ---
 
 # COMMAND ORDER – RUN IN THIS EXACT ORDER
+Step 0: Remove processes:
+9000,9001,9002,9003,9004,8080 | ForEach-Object {                                                                    
+  Get-NetTCPConnection -LocalPort $_ -State Listen -ErrorAction SilentlyContinue |
+     Select-Object -ExpandProperty OwningProcess -Unique |
+    ForEach-Object { Stop-Process -Id $_ -Force }
+ }                     vvvvvvvvvvvvvvvvvvvvvvv
 
 ## STEP 1 — Start tracker on tracker machine
 Run this **only on the tracker machine**:
 
 ```powershell
 $env:APP_MODE="tracker"
-$env:APP_IP="192.168.208.150"
+$env:APP_IP="192.168.1.5"
 $env:P2P_PORT="9100"
 $env:INSTANCE_ID="tracker"
-py start_sampleapp.py --server-ip 192.168.208.150 --server-port 9000 --mode tracker
+py start_sampleapp.py --server-ip 192.168.1.5 --server-port 9000 --mode tracker
 ```
 
 Keep this terminal open.
@@ -106,7 +112,7 @@ Keep this terminal open.
 Run on tracker machine or any machine that can reach tracker:
 
 ```powershell
-Invoke-RestMethod -Uri "http://192.168.208.150:9000/get-list" -Method GET | ConvertTo-Json -Depth 6
+Invoke-RestMethod -Uri "http://192.168.1.5:9000/get-list" -Method GET | ConvertTo-Json -Depth 6
 ```
 
 If this works, the tracker is ready.
@@ -118,7 +124,7 @@ Run this **only on Alice machine**.
 
 ### 3.1 Get Alice current IP
 ```powershell
-$trackerIp = "192.168.208.150"
+$trackerIp = "192.168.1.5"
 
 $udp = New-Object System.Net.Sockets.Socket(
   [System.Net.Sockets.AddressFamily]::InterNetwork,
@@ -133,11 +139,11 @@ $udp.Close()
 $myIP
 ```
 
-> If this prints `192.168.208.150`, you are on the tracker machine, not Alice machine.
+> If this prints `192.168.1.5`, you are on the tracker machine, not Alice machine.
 
 ### 3.2 Start Alice peer
 ```powershell
-$trackerIp = "192.168.208.150"
+$trackerIp = "192.168.1.5"
 
 $udp = New-Object System.Net.Sockets.Socket(
   [System.Net.Sockets.AddressFamily]::InterNetwork,
@@ -162,7 +168,7 @@ Keep this terminal open.
 Open a second terminal on Alice machine and run:
 
 ```powershell
-$trackerIp = "192.168.208.150"
+$trackerIp = "192.168.1.5"
 
 $udp = New-Object System.Net.Sockets.Socket(
   [System.Net.Sockets.AddressFamily]::InterNetwork,
@@ -192,7 +198,7 @@ Run this **only on Bob machine**.
 
 ### 4.1 Get Bob current IP
 ```powershell
-$trackerIp = "192.168.208.150"
+$trackerIp = "192.168.1.5"
 
 $udp = New-Object System.Net.Sockets.Socket(
   [System.Net.Sockets.AddressFamily]::InterNetwork,
@@ -207,11 +213,11 @@ $udp.Close()
 $myIP
 ```
 
-> If this prints `192.168.208.150`, you are on the tracker machine, not Bob machine.
+> If this prints `192.168.1.5`, you are on the tracker machine, not Bob machine.
 
 ### 4.2 Start Bob peer
 ```powershell
-$trackerIp = "192.168.208.150"
+$trackerIp = "192.168.1.5"
 
 $udp = New-Object System.Net.Sockets.Socket(
   [System.Net.Sockets.AddressFamily]::InterNetwork,
@@ -236,7 +242,7 @@ Keep this terminal open.
 Open a second terminal on Bob machine and run:
 
 ```powershell
-$trackerIp = "192.168.208.150"
+$trackerIp = "192.168.1.5"
 
 $udp = New-Object System.Net.Sockets.Socket(
   [System.Net.Sockets.AddressFamily]::InterNetwork,
@@ -265,7 +271,7 @@ Invoke-RestMethod -Uri "http://${trackerIp}:9000/submit-info" `
 Run on tracker machine:
 
 ```powershell
-Invoke-RestMethod -Uri "http://192.168.208.150:9000/get-list" -Method GET | ConvertTo-Json -Depth 6
+Invoke-RestMethod -Uri "http://192.168.1.5:9000/get-list" -Method GET | ConvertTo-Json -Depth 6
 ```
 
 Expected:
@@ -367,7 +373,7 @@ Invoke-RestMethod -Uri "http://<Alice_Current_IP>:9001/broadcast-peer" `
 Run on tracker machine:
 
 ```powershell
-py start_proxy.py --server-ip 192.168.208.150 --server-port 8080
+py start_proxy.py --server-ip 192.168.1.5 --server-port 8080
 ```
 
 Keep this terminal open.
@@ -378,23 +384,23 @@ Keep this terminal open.
 
 ### Tracker via proxy
 ```powershell
-Invoke-RestMethod -Uri "http://192.168.208.150:8080/get-list" `
+Invoke-RestMethod -Uri "http://192.168.1.5:8080/get-list" `
   -Method GET `
-  -Headers @{ Host = "192.168.208.150:8080" } | ConvertTo-Json -Depth 6
+  -Headers @{ Host = "192.168.1.5:8080" } | ConvertTo-Json -Depth 6
 ```
 
 ### Alice via proxy
 ```powershell
-Invoke-RestMethod -Uri "http://192.168.208.150:8080/self-info" `
+Invoke-RestMethod -Uri "http://192.168.1.5:8080/self-info" `
   -Method GET `
-  -Headers @{ Host = "alice.192.168.208.150.nip.io:8080" } | ConvertTo-Json -Depth 6
+  -Headers @{ Host = "alice.192.168.1.5.nip.io:8080" } | ConvertTo-Json -Depth 6
 ```
 
 ### Bob via proxy
 ```powershell
-Invoke-RestMethod -Uri "http://192.168.208.150:8080/self-info" `
+Invoke-RestMethod -Uri "http://192.168.1.5:8080/self-info" `
   -Method GET `
-  -Headers @{ Host = "bob.192.168.208.150.nip.io:8080" } | ConvertTo-Json -Depth 6
+  -Headers @{ Host = "bob.192.168.1.5.nip.io:8080" } | ConvertTo-Json -Depth 6
 ```
 
 ---
@@ -408,9 +414,9 @@ $body = @{
   password = "123"
 } | ConvertTo-Json
 
-$r = Invoke-WebRequest -Uri "http://192.168.208.150:8080/login" `
+$r = Invoke-WebRequest -Uri "http://192.168.1.5:8080/login" `
   -Method POST `
-  -Headers @{ Host = "alice.192.168.208.150.nip.io:8080" } `
+  -Headers @{ Host = "alice.192.168.1.5.nip.io:8080" } `
   -ContentType "application/json" `
   -Body $body `
   -SessionVariable sProxyAlice
@@ -421,17 +427,17 @@ $r.Headers["Set-Cookie"]
 
 ### Check `/me`
 ```powershell
-Invoke-RestMethod -Uri "http://192.168.208.150:8080/me" `
+Invoke-RestMethod -Uri "http://192.168.1.5:8080/me" `
   -Method GET `
-  -Headers @{ Host = "alice.192.168.208.150.nip.io:8080" } `
+  -Headers @{ Host = "alice.192.168.1.5.nip.io:8080" } `
   -WebSession $sProxyAlice | ConvertTo-Json -Depth 6
 ```
 
 ### Logout
 ```powershell
-Invoke-RestMethod -Uri "http://192.168.208.150:8080/logout" `
+Invoke-RestMethod -Uri "http://192.168.1.5:8080/logout" `
   -Method POST `
-  -Headers @{ Host = "alice.192.168.208.150.nip.io:8080" } `
+  -Headers @{ Host = "alice.192.168.1.5.nip.io:8080" } `
   -WebSession $sProxyAlice | ConvertTo-Json -Depth 6
 ```
 
@@ -442,7 +448,7 @@ Run on tracker machine:
 
 ```powershell
 1..8 | ForEach-Object {
-  Invoke-RestMethod -Uri "http://192.168.208.150:8080/instance" `
+  Invoke-RestMethod -Uri "http://192.168.1.5:8080/instance" `
     -Method GET `
     -Headers @{ Host = "rr.local" } | ConvertTo-Json -Compress
 }
